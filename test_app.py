@@ -306,6 +306,27 @@ class TestHoles(unittest.TestCase):
         r = app.holes_rank([mk("A", 50, 5), mk("B", 90, 9), mk("C", 39, 20), mk("D", 50, 8)])
         self.assertEqual([x["team"] for x in r], ["B", "D", "A"]); self.assertEqual(r[0]["rank"], 1)
 
+class TestChance(unittest.TestCase):
+    T = {"temp": 85}
+    def test_weak_attack_low(self):
+        c = app.goal_chance(self.T, {"gf_avg": 0.6, "on_avg": 2.0, "tot_avg": 8.0}, {"on": [1, 5], "cor": [1, 6], "da": [10, 40]})
+        self.assertLessEqual(c["score"], 30); self.assertTrue(c["notes"])
+    def test_strong_attack_high(self):
+        c = app.goal_chance(self.T, {"gf_avg": 2.2, "on_avg": 6.0, "tot_avg": 15.0}, {"on": [1, 4], "cor": [2, 4], "da": [20, 40]})
+        self.assertGreaterEqual(c["score"], 75)
+    def test_missing_parts_renormalized(self):
+        c = app.goal_chance({"temp": 100}, {"gf_avg": 2.0, "on_avg": None, "tot_avg": None}, None)
+        self.assertEqual(c["score"], 100); self.assertEqual(sum(p["weight"] for p in c["parts"]), 100)
+    def test_no_opp_capped(self):
+        self.assertLessEqual(app.goal_chance({"temp": 100}, None, None)["score"], 50)
+    def test_live_pressure(self):
+        self.assertEqual(app.live_pressure({"on": [1, 3], "cor": None, "da": [0, 0]})["share"], 0.62)
+        self.assertIsNone(app.live_pressure({"on": None}))
+    def test_rank_by_chance_then_temp(self):
+        mk = lambda n, t, c: {"team": n, "t": {"temp": t}, "ga_raw": 5, "chance": {"score": c}}
+        r = app.holes_rank([mk("SanMartin", 95, 20), mk("B", 60, 70), mk("C", 80, 70), mk("D", 30, 99)])
+        self.assertEqual([x["team"] for x in r], ["C", "B", "SanMartin"])
+
 if __name__ == "__main__":
     unittest.main()
 

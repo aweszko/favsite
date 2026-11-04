@@ -1106,10 +1106,53 @@ def temperature(adj):
 def temp_label(t):
     return "bardzo dziurawa" if t >= 80 else "dziurawa" if t >= 60 else "przepuszcza"
 
+WEAK_ATT = 0.8         # rywal strzelający < 0,8 gola/mecz: wynik mocno obniżony
+CHANCE_RULE = ("Szansa na gola rywala (0–100) = 100 × [35% · temperatura obrony/100 + 35% · min(1, śr. goli rywala z ost. 5 meczów (≤90 dni) / 2) + "
+               "10% · min(1, śr. celnych rywala / 6) (gdy brak: strzały / 15) + 20% · presja LIVE (udział rywala w celnych, rożnych i groźnych atakach "
+               "w tym meczu, średnia z dostępnych)]. Brakujące składniki są pomijane, a wagi przeskalowane. Gdy rywal strzela < 0,8 gola/mecz: "
+               "wynik × 0,5 i maks. 30. Brak danych o ataku rywala: przyjmujemy 1,35 [średnia ligowa] i maks. 50.")
+
+def live_pressure(live):
+    """Udział rywala (indeks 1) w celnych/rożnych/groźnych atakach LIVE. None gdy brak."""
+    if not live: return None
+    parts = {}
+    for k in ("on", "cor", "da"):
+        v = live.get(k)
+        if not v or v[0] is None or v[1] is None: continue
+        a, b = to_int(v[0]) or 0, to_int(v[1]) or 0
+        parts[k] = round(b / (a + b), 2) if a + b > 0 else 0.5
+    if not parts: return None
+    return {"share": round(sum(parts.values()) / len(parts), 2), "parts": parts}
+
+def goal_chance(t, opp_att, live):
+    """Łączy temperaturę obrony z siłą ataku rywala (+ LIVE). Zwraca dict z wynikiem i składnikami."""
+    if not t: return None
+    comp, notes = [], []
+    comp.append(("Temperatura obrony", 0.35, t["temp"] / 100.0))
+    ga = (opp_att or {}).get("gf_avg")
+    if ga is None:
+        ga_used = LEAGUE_AVG; notes.append("brak danych o ataku rywala – przyjęto 1,35, maks. 50")
+    else: ga_used = ga
+    comp.append(("Gole rywala/mecz", 0.35, min(1.0, ga_used / 2.0)))
+    on, tot = (opp_att or {}).get("on_avg"), (opp_att or {}).get("tot_avg")
+    if on is not None: comp.append(("Celne rywala/mecz", 0.10, min(1.0, on / 6.0)))
+    elif tot is not None: comp.append(("Strzały rywala/mecz", 0.10, min(1.0, tot / 15.0)))
+    lp = live_pressure(live)
+    if lp: comp.append(("Presja LIVE rywala", 0.20, lp["share"]))
+    W = sum(w for _, w, _ in comp)
+    v = 100 * sum(w * x for _, w, x in comp) / W
+    if ga is None: v = min(v, 50)
+    elif ga < WEAK_ATT:
+        v = min(v * 0.5, 30); notes.append("rywal strzela < 0,8 gola/mecz – wynik ×0,5, maks. 30")
+    sc = int(round(v))
+    return {"score": sc, "label": "wysoka" if sc >= 65 else "średnia" if sc >= 45 else "niska", "opp_gf_avg": ga,
+            "live_share": lp["share"] if lp else None, "notes": notes,
+            "parts": [{"name": n, "weight": round(w / W * 100), "value": int(round(x * 100))} for n, w, x in comp]}
+
 def holes_rank(rows):
-    """Sort: temperatura malejąco, potem surowe gole stracone, potem nazwa. <TEMP_MIN wypada."""
+    """Sort: szansa na gola rywala malejąco, potem temperatura, gole stracone, nazwa. Temperatura <TEMP_MIN wypada."""
     ok = [r for r in rows if r.get("t") and r["t"]["temp"] >= TEMP_MIN]
-    ok.sort(key=lambda r: (-r["t"]["temp"], -r["ga_raw"], r["team"] or ""))
+    ok.sort(key=lambda r: (-((r.get("chance") or {}).get("score") or 0), -r["t"]["temp"], -r["ga_raw"], r["team"] or ""))
     for i, r in enumerate(ok, 1): r["rank"] = i
     return ok
 
@@ -1171,6 +1214,7 @@ def holes(progress=None):
     for r in rows:
         o = [x for x in by_ev[r["eventId"]] if x is not r]
         r["opp_att"] = opp_attack_summary(o[0]["_g"]) if o else None
+        r["chance"] = goal_chance(r.get("t"), r["opp_att"], r.get("live"))
     full = [r for r in rows if r.get("t")]
     lst = holes_rank(full)
     def prof(r):
@@ -1190,7 +1234,7 @@ def holes(progress=None):
                        "no_shots": sum(1 for r in lst if not r["t"]["shots"])},
             "footer": {"live_matches": len(evs), "without_betradar": sum(1 for k, _ in res if k == "nobr"),
                        "without_stats": sum(1 for k, _ in res if k == "nostats")},
-            "rule": WORST_RULE, "note": "Statystyki z ostatnich 5 meczów – forma, nie gwarancja"}
+            "rule": WORST_RULE, "chance_rule": CHANCE_RULE, "note": "Statystyki z ostatnich 5 meczów – forma, nie gwarancja"}
 
 WORST_TTL = 120
 WORST_STATE = {"res": None, "t": 0, "job": None}
