@@ -271,14 +271,25 @@ def qualifies(r):
         return x is not None and y is not None and x - y >= 1.5
     return False
 
-def build_ranking(rows, min_games=None, sort_key="avg_on"):
-    ok = [r for r in rows if qualifies(r)]
+def stats_lead(r):
+    """Faworyt z kursu musi prowadzić w ost. 5: średnia celnych ORAZ średnia strzałów ogółem > rywala."""
+    st, os_ = r.get("stats") or {}, r.get("opp_stats") or {}
+    a1, b1, a2, b2 = st.get("avg_on"), os_.get("avg_on"), st.get("avg_tot"), os_.get("avg_tot")
+    if None in (a1, b1, a2, b2): return False
+    return a1 - b1 > 1e-9 and a2 - b2 > 1e-9
+
+def build_ranking(rows, min_games=None, sort_key="avg_on", with_conflict=False):
+    q = [r for r in rows if qualifies(r)]
     few = [r for r in rows if not qualifies(r)]
+    ok = [r for r in q if stats_lead(r)]
+    conflict = [r for r in q if not stats_lead(r)]
     def k(r):
         x, y = r["stats"].get("avg_on") or 0, ((r.get("opp_stats") or {}).get("avg_on") or 0)
         return (x - y, x)                     # głównie różnica średnich celnych na mecz
     ok.sort(key=k, reverse=True)
     for i, r in enumerate(ok, 1): r["rank"] = i
+    conflict.sort(key=k)
+    if with_conflict: return ok, few, conflict
     return ok, few
 
 # ---------- składanie ----------
@@ -344,12 +355,12 @@ def ranking(mode="all", min_games=3, odds_min=1.2, odds_max=2.0, sort_key="sum_o
     with ThreadPoolExecutor(4) as ex:
         res += list(ex.map(run, favs))
     rows = [r for k, r in res if r]
-    ok, few = build_ranking(rows, min_games, sort_key)
+    ok, few, conflict = build_ranking(rows, min_games, sort_key, with_conflict=True)
     cnt = lambda k: sum(1 for kk, _ in res if kk == k)
     now = datetime.now(timezone.utc)
     return {"generated_warsaw": to_warsaw(now).strftime("%Y-%m-%d %H:%M:%S"), "mode": mode,
             "params": {"min_games": min_games, "odds_min": odds_min, "odds_max": odds_max},
-            "ranking": ok, "too_few": few,
+            "ranking": ok, "too_few": few, "conflict": conflict,
             "footer": {"matches": len(evs), "without_betradar": sum(1 for e in evs if not e["br"]),
                        "favourites": len(rows) + cnt("nobr") + sum(1 for k, r in res if k == "nostats" and not r),
                        "favourites_without_betradar": cnt("nobr"), "without_stats": cnt("nostats")},

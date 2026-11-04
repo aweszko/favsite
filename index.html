@@ -63,8 +63,8 @@ input:focus,button:focus-visible{outline:2px solid var(--g);outline-offset:1px}.
 <div id="list"></div>
 <div id="rank" hidden>
 <div class="f"><label>min. meczów<input id="mg" type="number" min="0" max="5" value="3"></label>
-<label>kurs od<input id="omin" type="number" step="0.05" value="1.20" inputmode="decimal"></label>
-<label>kurs do<input id="omax" type="number" step="0.05" value="2.00" inputmode="decimal"></label></div>
+<label>kurs od<input id="omin" type="number" step="0.05" value="1.20" autocomplete="off" inputmode="decimal"></label>
+<label>kurs do<input id="omax" type="number" step="0.05" value="2.00" autocomplete="off" inputmode="decimal"></label></div>
 <div id="rk"></div></div>
 <div id="vip" hidden><div class="vnote">VIP · Najostrzejsze typy – żadna pewność, tylko spełnione kryteria · bez progu kursu (faworyt 1,00–2,00) · LIVE: pełna dominacja</div><div id="vp"></div></div>
 <div id="pro" hidden><div class="vnote">Pewniaki PRO · Etap 1: lista obserwowanych (kryteria ost. 5) · Etap 2: typ dopiero LIVE przy pełnej dominacji i presji w ost. 10 min · <b>Typy to spełnione kryteria, nie gwarancja</b></div><div id="pp"></div></div>
@@ -110,9 +110,10 @@ ${open[id]?`<div class="g two"><div><h4>${esc(r.team)}</h4>${games(r.games)}</di
 function srErr(d){const e=d.errors||{};return Object.keys(e).some(k=>/sportradar/i.test(k))?'<div class="empty err">Brak danych ze źródła statystyk (Sportradar): '+esc(e.Sportradar||'')+'</div>':''}
 function drawRank(){if(!R)return;if(R.status=='computing'){const p=R.progress||{};$('#rk').innerHTML='<div class="empty">Liczę ranking… ('+(p.done||0)+'/'+(p.total||'?')+')</div>'+srErr(R);$('#st').textContent='Liczę ranking… ('+(p.done||0)+'/'+(p.total||'?')+')';return}if(R.error){$('#rk').innerHTML='<div class="empty err">Błąd: '+esc(R.error)+'</div>';return}
 $('#rk').innerHTML=srErr(R)+(R.ranking.length?R.ranking.map(r=>card(r)).join(''):'<div class="empty">Brak faworytów spełniających kryteria.</div>')+
+((R.conflict||[]).length?`<button class="tg" style="margin:16px 12px 0" onclick="open.cf=!open.cf;drawRank()">${open.cf?'▲':'▼'} Sprzeczne z kursem (statystyki wskazują rywala) (${R.conflict.length})</button>`+(open.cf?'<div class="empty" style="padding:8px 12px;text-align:left">Faworyt wg kursu Superbet nie prowadzi w ost. 5 meczach (śr. celnych i/lub śr. strzałów ogółem ≤ rywala). Te mecze nie są typami rankingu.</div>'+R.conflict.map(r=>card(r,1)).join(''):''):'')+
 (R.too_few.length?'<h3 style="margin:16px 12px 0;font-size:14px;color:var(--g)">Za mało danych ('+R.too_few.length+')</h3>'+R.too_few.map(r=>card(r,1)).join(''):'')+
 `<div class="empty" style="padding:10px">Meczów: ${R.footer.matches} · faworytów bez statystyk: ${R.footer.without_stats} · bez betradarId: ${R.footer.without_betradar}</div>`;status(R)}
-function status(d){const e=Object.entries(d.errors||{});$('#st').innerHTML=`Aktualizacja: ${d.generated_warsaw} (Warszawa)`+(e.length?`<div class="err">Błąd źródła (pokazuję ostatni cache): ${esc(e.map(x=>x.join(': ')).join('; '))}</div>`:'')}
+function status(d){const e=Object.entries(d.errors||{});$('#st').innerHTML=`Aktualizacja: ${d.generated_warsaw} (Warszawa)`+(d.params?` · kurs faworyta ${f(d.params.odds_min)}–${f(d.params.odds_max)}`:'')+(e.length?`<div class="err">Błąd źródła (pokazuję ostatni cache): ${esc(e.map(x=>x.join(': ')).join('; '))}</div>`:'')}
 async function loadList(){try{const t=performance.now();M=await (await fetch('/api/matches')).json();if(M.error)throw M.error;drawTabs();drawList();status(M);$('#st').innerHTML+=` · ${M.matches.length} meczów · ${Math.round(performance.now()-t)} ms`}catch(e){$('#st').innerHTML='<span class="err">Błąd ładowania: '+esc(e)+'</span>'}}
 let rt=null;async function loadRank(){clearTimeout(rt);if(!R||R.status!='computing')$('#st').textContent='Ładowanie rankingu…';
 const q=new URLSearchParams({mode:rmode,min_games:$('#mg').value,odds_min:$('#omin').value.replace(',','.'),odds_max:$('#omax').value.replace(',','.')});

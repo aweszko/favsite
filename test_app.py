@@ -35,6 +35,28 @@ class T(unittest.TestCase):
         self.assertEqual(app.to_warsaw(datetime(2026, 11, 4, 12, 0, tzinfo=timezone.utc)).hour, 13)
         self.assertEqual(app.to_warsaw(datetime(2026, 7, 1, 12, 0, tzinfo=timezone.utc)).hour, 14)
 
+class TConflict(unittest.TestCase):  # PRZYKŁADOWE
+    @staticmethod
+    def S(on, tot, n=5): return app.compute_stats([{"on": on, "tot": tot}] * n)
+    def test_mahallah_case_goes_to_conflict(self):
+        r = {"team": "M", "stats": self.S(1.4, 6.2), "opp_stats": self.S(3.8, 9.6)}
+        ok, few, cf = app.build_ranking([r], 3, with_conflict=True)
+        self.assertEqual(ok, []); self.assertEqual(few, []); self.assertEqual([x["team"] for x in cf], ["M"])
+    def test_lead_requires_both(self):
+        self.assertFalse(app.stats_lead({"stats": self.S(5, 8), "opp_stats": self.S(3, 10)}))   # celne +, ogółem -
+        self.assertFalse(app.stats_lead({"stats": self.S(3, 12), "opp_stats": self.S(4, 10)}))  # celne -, ogółem +
+        self.assertFalse(app.stats_lead({"stats": self.S(4, 10), "opp_stats": self.S(4, 9)}))   # celne równe
+        self.assertTrue(app.stats_lead({"stats": self.S(5, 12), "opp_stats": self.S(4, 10)}))
+    def test_few_not_in_conflict(self):
+        r = {"team": "X", "stats": self.S(1, 3, 3), "opp_stats": self.S(5, 9)}
+        ok, few, cf = app.build_ranking([r], 3, with_conflict=True)
+        self.assertEqual(([x["team"] for x in few], cf), (["X"], []))
+    def test_4v5_exception_still_needs_lead(self):
+        r = {"team": "Y", "stats": app.compute_stats([{"on": 6, "tot": 8}] * 4 + [{"on": None, "tot": None}]),
+             "opp_stats": self.S(4, 10)}
+        ok, few, cf = app.build_ranking([r], 3, with_conflict=True)
+        self.assertEqual((ok, [x["team"] for x in cf]), ([], ["Y"]))
+
 class T2(unittest.TestCase):
     def test_compare_diff(self):  # PRZYKŁADOWE
         a = app.compute_stats(SAMPLE_GAMES); b = app.compute_stats([{"on": 2, "tot": 8}] * 5)
