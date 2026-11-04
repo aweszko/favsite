@@ -93,15 +93,16 @@ ${line('celność',a.accuracy,b&&b.accuracy,dif(d.accuracy,'%'),1,'%')}
 ${line('mecze z danymi',null,null,'',0).replace(/<span class="nd">brak danych<\/span>/,ga).replace(/<span class="nd">brak danych<\/span>/,gb)}</div>
 <button class="tg" onclick="open[${id}]=!open[${id}];drawRank()">${open[id]?'▲ ukryj':'▼ ostatnie 5 meczów obu drużyn'} (celne/ogółem)</button>
 ${open[id]?`<div class="g two"><div><h4>${esc(r.team)}</h4>${games(r.games)}</div><div><h4>${esc(r.opponent)}</h4>${games(r.opp_games)}</div></div>`:''}</div>`}
-function drawRank(){if(!R)return;if(R.error){$('#rk').innerHTML='<div class="empty err">Błąd: '+esc(R.error)+'</div>';return}
-$('#rk').innerHTML=(R.ranking.length?R.ranking.map(r=>card(r)).join(''):'<div class="empty">Brak faworytów spełniających kryteria.</div>')+
+function srErr(d){const e=d.errors||{};return Object.keys(e).some(k=>/sportradar/i.test(k))?'<div class="empty err">Brak danych ze źródła statystyk (Sportradar): '+esc(e.Sportradar||'')+'</div>':''}
+function drawRank(){if(!R)return;if(R.status=='computing'){const p=R.progress||{};$('#rk').innerHTML='<div class="empty">Liczę ranking… ('+(p.done||0)+'/'+(p.total||'?')+')</div>'+srErr(R);$('#st').textContent='Liczę ranking… ('+(p.done||0)+'/'+(p.total||'?')+')';return}if(R.error){$('#rk').innerHTML='<div class="empty err">Błąd: '+esc(R.error)+'</div>';return}
+$('#rk').innerHTML=srErr(R)+(R.ranking.length?R.ranking.map(r=>card(r)).join(''):'<div class="empty">Brak faworytów spełniających kryteria.</div>')+
 (R.too_few.length?'<h3 style="margin:16px 12px 0;font-size:14px;color:#e7a0ad">Za mało danych ('+R.too_few.length+')</h3>'+R.too_few.map(r=>card(r,1)).join(''):'')+
 `<div class="empty" style="padding:10px">Meczów: ${R.footer.matches} · faworytów bez statystyk: ${R.footer.without_stats} · bez betradarId: ${R.footer.without_betradar}</div>`;status(R)}
 function status(d){const e=Object.entries(d.errors||{});$('#st').innerHTML=`Aktualizacja: ${d.generated_warsaw} (Warszawa)`+(e.length?`<div class="err">Błąd źródła (pokazuję ostatni cache): ${esc(e.map(x=>x.join(': ')).join('; '))}</div>`:'')}
 async function loadList(){try{const t=performance.now();M=await (await fetch('/api/matches')).json();if(M.error)throw M.error;drawTabs();drawList();status(M);$('#st').innerHTML+=` · ${M.matches.length} meczów · ${Math.round(performance.now()-t)} ms`}catch(e){$('#st').innerHTML='<span class="err">Błąd ładowania: '+esc(e)+'</span>'}}
-async function loadRank(){$('#st').textContent='Ładowanie rankingu… (pierwsze pobranie statystyk może potrwać 1–3 min)';
+let rt=null;async function loadRank(){clearTimeout(rt);if(!R||R.status!='computing')$('#st').textContent='Ładowanie rankingu…';
 const q=new URLSearchParams({mode:rmode,min_games:$('#mg').value,odds_min:$('#omin').value.replace(',','.'),odds_max:$('#omax').value.replace(',','.')});
-try{R=await (await fetch('/api/ranking?'+q)).json();drawRank()}catch(e){$('#st').innerHTML='<span class="err">Błąd: '+esc(e)+'</span>'}}
+try{R=await (await fetch('/api/ranking?'+q)).json();drawRank();if(R.status=='computing'&&view=='rank')rt=setTimeout(loadRank,4000)}catch(e){$('#st').innerHTML='<span class="err">Błąd: '+esc(e)+'</span>';rt=setTimeout(loadRank,5000)}}
 document.querySelectorAll('[data-v]').forEach(b=>b.onclick=()=>{view=b.dataset.v;document.querySelectorAll('[data-v]').forEach(x=>x.classList.toggle('on',x==b));
 $('#list').hidden=view!='list';$('#rank').hidden=view!='rank';drawTabs();if(view=='rank'){R?drawRank():loadRank()}else if(M)status(M)});
 ['#mg','#omin','#omax'].forEach(s=>$(s).onchange=loadRank);

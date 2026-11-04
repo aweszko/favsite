@@ -15,10 +15,15 @@ HDR = {"User-Agent": "Mozilla/5.0", "Accept": "application/json"}
 TEAM_TTL = 6 * 3600
 LIST_TTL = 55
 WEEK_DAYS = 7
-SEM = threading.Semaphore(8)          # max 8 równoległych zapytań HTTP
+SEM = threading.Semaphore(4)          # max 4 równoległych zapytań HTTP
 LOCK = threading.Lock()
 CACHE = {}                            # klucz -> (czas, wartość)
 ERRORS = {}                           # źródło -> ostatni błąd
+COUNTERS = {"http_ok": 0, "http_fail": 0, "sportradar_ok": 0, "sportradar_fail": 0, "superbet_ok": 0, "superbet_fail": 0}
+LAST_OK = {}                          # źródło -> czas ostatniej udanej odpowiedzi
+STARTED = time.time()
+def _inc(k):
+    with LOCK: COUNTERS[k] = COUNTERS.get(k, 0) + 1
 
 # ---------- czas Warszawy (bez zoneinfo/tzdata, działa też na Windows) ----------
 def _last_sunday(y, m):
@@ -44,11 +49,13 @@ def http_json(url, source):
                 with urllib.request.urlopen(req, timeout=12) as r:
                     data = json.loads(r.read().decode("utf-8"))
             ERRORS.pop(source, None)
+            _inc("http_ok"); _inc(source.lower() + "_ok"); LAST_OK[source] = time.time()
             return data
         except Exception as e:
             last = e
             time.sleep(0.7 * (i + 1))
     ERRORS[source] = "%s: %s" % (type(last).__name__, last)
+    _inc("http_fail"); _inc(source.lower() + "_fail")
     return None
 
 def cached(key, ttl, fn):
@@ -268,10 +275,6 @@ def process_event(ev, odds_min, odds_max):
 
 def _process_event(ev, odds_min, odds_max):
     o1, o2 = ev["o1"], ev["o2"]
-    if o1 is None or o2 is None:
-        o = event_odds(ev["eventId"]) or (None, None, None)
-        o1, ev["ox"], o2 = o
-        ev["o1"], ev["o2"] = o1, o2
     fv = pick_favourite(o1, o2, odds_min, odds_max)
     if not fv: return ("nofav", None)
     side, fav, other = fv
@@ -304,7 +307,7 @@ def compare(a, b):
             out[k] = round(x - y, 2)
     return out
 
-def ranking(mode="all", min_games=3, odds_min=1.2, odds_max=2.0, sort_key="sum_on"):
+def ranking(mode="all", min_games=3, odds_min=1.2, odds_max=2.0, sort_key="sum_on", progress=None):
     evs = []
     if mode in ("live", "all"): evs += get_list("live")
     if mode in ("prematch", "all"):
@@ -312,8 +315,17 @@ def ranking(mode="all", min_games=3, odds_min=1.2, odds_max=2.0, sort_key="sum_o
         today = to_warsaw(datetime.now(timezone.utc)).strftime("%Y-%m-%d")   # ranking: przedmeczowe tylko dziś
         evs += [e for e in get_list("prematch") if e["eventId"] not in ids and e.get("day_warsaw") == today]
     evs = [dict(e) for e in evs]
-    with ThreadPoolExecutor(6) as ex:
-        res = list(ex.map(lambda e: process_event(e, odds_min, odds_max), evs))
+    # najpierw odfiltruj mecze bez faworyta (bez żadnych zapytań HTTP)
+    favs = [e for e in evs if pick_favourite(e["o1"], e["o2"], odds_min, odds_max)]
+    res = [("nofav", None)] * (len(evs) - len(favs))
+    if progress is not None: progress.update(done=0, total=len(favs))
+    def run(e):
+        r = process_event(e, odds_min, odds_max)
+        if progress is not None:
+            with LOCK: progress["done"] += 1
+        return r
+    with ThreadPoolExecutor(4) as ex:
+        res += list(ex.map(run, favs))
     rows = [r for k, r in res if r]
     ok, few = build_ranking(rows, min_games, sort_key)
     cnt = lambda k: sum(1 for kk, _ in res if kk == k)
@@ -325,6 +337,54 @@ def ranking(mode="all", min_games=3, odds_min=1.2, odds_max=2.0, sort_key="sum_o
                        "favourites": len(rows) + cnt("nobr") + sum(1 for k, r in res if k == "nostats" and not r),
                        "favourites_without_betradar": cnt("nobr"), "without_stats": cnt("nostats")},
             "errors": dict(ERRORS)}
+
+# ---------- ranking w tle (single-flight + cache) ----------
+TTL = {"live": 180, "prematch": 600, "all": 180}
+JOBS = {}                             # klucz -> {"thread", "progress", "started"}
+RESULTS = {}                          # klucz -> (czas, wynik, czas_liczenia_s)
+
+def _rkey(mode, mg, omin, omax): return (mode, int(mg), round(float(omin), 2), round(float(omax), 2))
+
+def _worker(key):
+    prog = JOBS[key]["progress"]; t0 = time.time()
+    try:
+        res = ranking(key[0], key[1], key[2], key[3], progress=prog)
+        res["compute_seconds"] = round(time.time() - t0, 1)
+        with LOCK: RESULTS[key] = (time.time(), res)
+    except Exception as e:
+        ERRORS["ranking"] = "%s: %s" % (type(e).__name__, e)
+    finally:
+        with LOCK: JOBS.pop(key, None)
+
+def get_ranking(mode="all", min_games=3, odds_min=1.2, odds_max=2.0):
+    key = _rkey(mode, min_games, odds_min, odds_max)
+    with LOCK:
+        r = RESULTS.get(key)
+        fresh = r and time.time() - r[0] < TTL[mode]
+        job = JOBS.get(key)
+        if not fresh and not job:
+            busy = [k for k in JOBS if k[0] == mode]          # jeden wątek na tryb
+            if busy: job = JOBS[busy[0]]
+            else:
+                if len(RESULTS) > 20: RESULTS.clear()
+                job = JOBS[key] = {"progress": {"done": 0, "total": 0}, "started": time.time()}
+                threading.Thread(target=_worker, args=(key,), daemon=True).start()
+    if r:
+        out = dict(r[1]); out["status"] = "ready"; out["stale"] = not fresh
+        out["age_seconds"] = round(time.time() - r[0]); out["errors"] = dict(ERRORS)
+        if job: out["progress"] = dict(job["progress"])
+        return out
+    return {"status": "computing", "progress": dict(job["progress"]),
+            "elapsed_seconds": round(time.time() - job["started"]), "errors": dict(ERRORS)}
+
+def status():
+    with LOCK:
+        return {"uptime_seconds": round(time.time() - STARTED), "errors": dict(ERRORS), "counters": dict(COUNTERS),
+                "last_ok_seconds_ago": {k: round(time.time() - v) for k, v in LAST_OK.items()},
+                "jobs": [{"key": list(k), "progress": dict(j["progress"]), "elapsed_seconds": round(time.time() - j["started"])} for k, j in JOBS.items()],
+                "results": [{"key": list(k), "age_seconds": round(time.time() - v[0]), "compute_seconds": v[1].get("compute_seconds"),
+                             "ranking": len(v[1]["ranking"]), "too_few": len(v[1]["too_few"]), "footer": v[1]["footer"]} for k, v in RESULTS.items()],
+                "cache_entries": len(CACHE), "threads": threading.active_count()}
 
 # ---------- serwer ----------
 HTML = open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "index.html"), encoding="utf-8").read()
@@ -343,6 +403,8 @@ class H(BaseHTTPRequestHandler):
         if u.path == "/api/matches":
             try: return self.send(200, json.dumps(matches(), ensure_ascii=False), "application/json; charset=utf-8")
             except Exception as e: return self.send(500, json.dumps({"error": str(e)}), "application/json")
+        if u.path == "/api/status":
+            return self.send(200, json.dumps(status(), ensure_ascii=False), "application/json; charset=utf-8")
         if u.path == "/healthz":
             return self.send(200, "ok", "text/plain")
         if u.path == "/api/ranking":
@@ -350,7 +412,7 @@ class H(BaseHTTPRequestHandler):
             try:
                 mode = q.get("mode", "all")
                 if mode not in ("live", "prematch", "all"): mode = "all"
-                res = ranking(mode, int(q.get("min_games", 3)), float(str(q.get("odds_min", 1.2)).replace(",", ".")),
+                res = get_ranking(mode, int(q.get("min_games", 3)), float(str(q.get("odds_min", 1.2)).replace(",", ".")),
                               float(str(q.get("odds_max", 2.0)).replace(",", ".")))
                 return self.send(200, json.dumps(res, ensure_ascii=False), "application/json; charset=utf-8")
             except Exception as e:
@@ -361,7 +423,7 @@ def main():
     port = int(sys.argv[1]) if len(sys.argv) > 1 and sys.argv[1].isdigit() else PORT
     srv = ThreadingHTTPServer(("0.0.0.0", port), H)
     print("Favsite działa: http://localhost:%d  (Ctrl+C = stop)" % port)
-    threading.Thread(target=lambda: (matches(), ranking("all")), daemon=True).start()  # rozgrzanie cache
+    threading.Thread(target=lambda: (matches(), get_ranking("all")), daemon=True).start()  # rozgrzanie cache
     if "--open" in sys.argv:
         threading.Timer(1.0, lambda: webbrowser.open("http://localhost:%d" % port)).start()
     try: srv.serve_forever()

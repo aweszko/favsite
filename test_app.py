@@ -53,5 +53,27 @@ class T2(unittest.TestCase):
         os.environ["PORT"] = "9123"; m = importlib.reload(app); self.assertEqual(m.PORT, 9123)
         del os.environ["PORT"]; importlib.reload(app)
 
+class T3(unittest.TestCase):
+    def test_background_single_flight(self):
+        import time, threading
+        calls = []
+        ev = threading.Event()
+        orig = app.ranking
+        def fake(mode, mg, a, b, progress=None, **k):
+            calls.append(mode); progress.update(done=0, total=2); ev.wait(2)
+            return {"ranking": [], "too_few": [], "footer": {}, "errors": {}}
+        app.ranking = fake
+        try:
+            t = time.time()
+            r1 = app.get_ranking("live"); r2 = app.get_ranking("live")
+            self.assertLess(time.time() - t, 0.5)
+            self.assertEqual(r1["status"], "computing"); self.assertEqual(r2["progress"]["total"], 2)
+            ev.set(); time.sleep(0.3)
+            self.assertEqual(len(calls), 1)
+            self.assertEqual(app.get_ranking("live")["status"], "ready")
+            self.assertIn("counters", app.status())
+        finally:
+            app.ranking = orig; app.RESULTS.clear()
+
 if __name__ == "__main__":
     unittest.main()
