@@ -472,7 +472,7 @@ def vip(rank_res):
         st, os_ = r.get("stats") or {}, r.get("opp_stats") or {}
         if (st.get("games_with_data") or 0) < 5 or (os_.get("games_with_data") or 0) < 5: continue   # tani filtr
         cands.append(r)
-    picks, rejected = [], 0
+    picks, rejected, watch = [], 0, []
     for r in cands:
         r = dict(r)
         cur = live_now.get(r["eventId"])
@@ -488,6 +488,8 @@ def vip(rank_res):
         ld = live_details(r["betradarId"]) if r["mode"] == "live" else None
         tf = table_row(r.get("season"), r.get("uid")); to = table_row(r.get("season"), r.get("opp_uid"))
         c = vip_check(r, r["odds_now"], ld, tf, to)
+        pre = vip_check(dict(r, mode="prematch"), r["odds_now"], None, tf, to)   # PRO: kryteria ost. 5 (bez live)
+        if all(x["ok"] for x in pre): watch.append(pro_watch_row(r, pre))
         if all(x["ok"] for x in c):
             r["checks"] = c; r["vip_type"] = "live" if r["mode"] == "live" else "przedmeczowy"
             r["form"] = form_stats(r.get("games")); r["opp_form"] = form_stats(r.get("opp_games"))
@@ -497,7 +499,7 @@ def vip(rank_res):
     now = datetime.now(timezone.utc)
     return {"generated_warsaw": to_warsaw(now).strftime("%Y-%m-%d %H:%M:%S"), "rules": VIP_RULES, "picks": picks,
             "checked": len(cands), "rejected": rejected, "ranking_generated_warsaw": rank_res.get("generated_warsaw"),
-            "message": None if picks else "Brak pewniaków - żaden mecz nie spełnia wszystkich kryteriów"}
+            "watch": watch, "message": None if picks else "Brak pewniaków - żaden mecz nie spełnia wszystkich kryteriów"}
 
 VIP_TTL = 75
 VIP_STATE = {"res": None, "t": 0, "job": False}
@@ -524,6 +526,246 @@ def get_vip():
         out["errors"] = dict(ERRORS); return out
     return {"status": "computing", "stage": "ranking" if rk.get("status") != "ready" else "vip",
             "progress": rk.get("progress") or {}, "errors": dict(ERRORS)}
+
+# ---------- PRO: lista obserwowanych + wyzwalacz live + rejestr ----------
+PRO_RULES = {
+    "minute": (10, 80),               # okno minut meczu
+    "on_diff": 2, "on_riv_max": 1,    # celne: faw. >= rywal + 2 i rywal <= 1
+    "da_ratio": 1.3, "da_diff": 10,   # groźne ataki: faw. >= 1,3x rywal i >= rywal + 10
+    "win": 10,                        # okno presji (ostatnie minuty)
+    "win_on": 2,                      # >= 2 celne w oknie, albo
+    "win_on_alt": 1, "win_cor_alt": 2,  # >= 1 celny i >= 2 rożne
+    "win_riv_on_max": 0,              # rywal: 0 celnych w oknie
+}
+PRO_TL_TTL = 50
+PRO_LOG_PATH = os.environ.get("PRO_LOG", os.path.join(os.path.dirname(os.path.abspath(__file__)), "pro_log.json"))
+PRO_LOCK = threading.Lock()
+
+def pro_watch_row(r, pre):
+    keys = ("team", "opponent", "side", "match", "tournament", "category", "mode", "start_warsaw", "day_warsaw",
+            "minutes", "score", "odds_fav", "odds_now", "eventId", "betradarId")
+    w = {k: r.get(k) for k in keys}
+    w["checks"] = pre
+    w["summary"] = "%d/%d kryteriów ost. 5 ✓" % (sum(1 for x in pre if x["ok"]), len(pre))
+    return w
+
+def tl_events(tl):
+    return [e for e in ((tl or {}).get("events") or []) if not e.get("disabled")]
+
+def tl_minute(tl):
+    ts = [to_int(e.get("time")) for e in tl_events(tl)]
+    ts = [t for t in ts if t is not None and t >= 0]
+    return max(ts) if ts else None
+
+def tl_ended(tl):
+    m = (tl or {}).get("match") or {}
+    st = m.get("status") or {}
+    return st.get("_id") == 100 or (m.get("timeinfo") or {}).get("ended") not in (None, "") or m.get("matchstatus") in ("result", "ended") \
+        or any(e.get("type") == "match_ended" for e in tl_events(tl))
+
+def tl_score(tl):
+    r = ((tl or {}).get("match") or {}).get("result") or {}
+    h, a = to_int(r.get("home")), to_int(r.get("away"))
+    if h is None or a is None:            # z ostatniego gola
+        gs = [e for e in tl_events(tl) if e.get("type") == "goal" and e.get("result")]
+        if gs: g = gs[-1]["result"]; return to_int(g.get("home")) or 0, to_int(g.get("away")) or 0
+        return 0, 0
+    return h, a
+
+def pressure(tl, side, minute=None, win=None):
+    """Celne / rożne obu drużyn w ostatnich `win` minutach. side: 'home'/'away' (faworyt)."""
+    win = win or PRO_RULES["win"]
+    cur = minute if minute is not None else tl_minute(tl)
+    opp = "away" if side == "home" else "home"
+    out = {"fav_on": 0, "riv_on": 0, "fav_cor": 0, "riv_cor": 0, "from": None, "to": cur}
+    if cur is None: return out
+    lo = cur - win
+    out["from"] = max(0, lo)
+    for e in tl_events(tl):
+        t = to_int(e.get("time"))
+        if t is None or t < 0 or t <= lo or t > cur: continue
+        typ, tm = e.get("type"), e.get("team")
+        if typ == "shotontarget" or (typ == "goal" and not e.get("owngoal")):   # gol = celny strzał
+            if tm == side: out["fav_on"] += 1
+            elif tm == opp: out["riv_on"] += 1
+        elif typ == "corner":
+            if tm == side: out["fav_cor"] += 1
+            elif tm == opp: out["riv_cor"] += 1
+    return out
+
+def pro_trigger(det, pr, side, minute, score):
+    """Zwraca (ok, checks). det: {'on':(h,a),'cor':(h,a),'da':(h,a)}; pr: wynik pressure()."""
+    R = PRO_RULES; i = 0 if side == "home" else 1
+    def lv(k):
+        p = (det or {}).get(k)
+        return (p[i], p[1 - i]) if p else (None, None)
+    nd = lambda x: x if x is not None else "brak danych"
+    c = []
+    c.append(_chk("Minuta meczu", minute is not None and R["minute"][0] <= minute <= R["minute"][1],
+                  nd(minute), None, "%d–%d'" % R["minute"]))
+    c.append(_chk("Wynik (dowolny)", True, score or "brak danych", None, "dowolny"))
+    fa, rv = lv("on")
+    c.append(_chk("Celne w meczu", fa is not None and rv is not None and fa >= rv + R["on_diff"] and rv <= R["on_riv_max"],
+                  nd(fa), nd(rv), "faw. ≥ rywal + %d i rywal ≤ %d" % (R["on_diff"], R["on_riv_max"])))
+    fa, rv = lv("cor")
+    c.append(_chk("Rożne w meczu", fa is not None and rv is not None and fa > rv, nd(fa), nd(rv), "faw. > rywal"))
+    fa, rv = lv("da")
+    c.append(_chk("Groźne ataki", fa is not None and rv is not None and fa >= R["da_ratio"] * rv - 1e-9 and fa >= rv + R["da_diff"],
+                  nd(fa), nd(rv), "faw. ≥ 1,3× rywal i ≥ rywal + %d" % R["da_diff"]))
+    p = pr or {}
+    fo, fc = p.get("fav_on", 0), p.get("fav_cor", 0)
+    c.append(_chk("Presja ost. %d min: faworyt" % R["win"],
+                  fo >= R["win_on"] or (fo >= R["win_on_alt"] and fc >= R["win_cor_alt"]),
+                  "%d cel. / %d roż." % (fo, fc), None, "≥ 2 celne lub ≥ 1 celny + ≥ 2 rożne"))
+    c.append(_chk("Presja ost. %d min: rywal bez celnych" % R["win"], p.get("riv_on", 0) <= R["win_riv_on_max"],
+                  None, "%d cel." % p.get("riv_on", 0), "0 celnych"))
+    return all(x["ok"] for x in c), c
+
+def settle(entry, tl):
+    """Rozlicza wpis na podstawie timeline. Zwraca dict wyników albo None (mecz trwa, brak rozstrzygnięcia)."""
+    side = entry["side_key"]; h0, a0 = entry["score_h"], entry["score_a"]; tot0 = h0 + a0
+    nxt = None; h, a = h0, a0
+    for e in tl_events(tl):
+        if e.get("type") != "goal" or not e.get("result"): continue
+        gh, ga = to_int(e["result"].get("home")), to_int(e["result"].get("away"))
+        if gh is None or ga is None or gh + ga <= tot0: continue
+        if nxt is None:
+            if gh > h0 and ga == a0: nxt = "home"
+            elif ga > a0 and gh == h0: nxt = "away"
+            else: nxt = e.get("team") or None
+        h, a = max(h, gh), max(a, ga)
+    fh, fa_ = tl_score(tl); h, a = max(h, fh), max(a, fa_)
+    ended = tl_ended(tl)
+    res = {}
+    if nxt is not None: res["next"] = "hit" if nxt == side else "miss"
+    elif ended: res["next"] = "miss"            # brak następnego gola = nietrafiony
+    if h + a >= tot0 + 1: res["over"] = "hit"
+    elif ended: res["over"] = "miss"
+    res["final"] = "%d:%d" % (h, a) if ended else None
+    return res
+
+def streaks(results):
+    """results: lista 'hit'/'miss' w kolejności chronologicznej -> (bieżąca seria, najdłuższa seria trafień)."""
+    best = run = 0
+    for x in results:
+        run = run + 1 if x == "hit" else 0; best = max(best, run)
+    cur = 0; kind = None
+    for x in reversed(results):
+        if kind is None: kind = x
+        if x != kind: break
+        cur += 1
+    return {"current": cur, "current_kind": kind, "longest_hit": best}
+
+def pro_load():
+    try:
+        with open(PRO_LOG_PATH, encoding="utf-8") as fh: return json.load(fh)
+    except Exception: return []
+
+def pro_save(log):
+    try:
+        tmp = PRO_LOG_PATH + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as fh: json.dump(log, fh, ensure_ascii=False)
+        os.replace(tmp, PRO_LOG_PATH)
+    except Exception as e: ERRORS["rejestr"] = "%s: %s" % (type(e).__name__, e)
+
+PRO_LOG = pro_load()
+
+def timeline(br, ttl=PRO_TL_TTL):
+    return cached("tl:%s" % br, ttl, lambda: gismo("match_timeline/%s" % br))
+
+def record_stats(log):
+    def summ(key):
+        done = [e[key] for e in log if e.get(key) in ("hit", "miss")]
+        hits = done.count("hit")
+        return {"types": len(log), "hits": hits, "misses": len(done) - hits, "pending": len(log) - len(done),
+                "hit_rate": round(100.0 * hits / len(done), 1) if done else None, **streaks(done)}
+    return {"next": summ("next"), "over": summ("over")}
+
+def pro_settle_pending(now_ts):
+    """Ponowne pobranie timeline meczów z nierozliczonymi typami (działa też po uśpieniu serwisu)."""
+    with PRO_LOCK: pend = [e for e in PRO_LOG if e.get("next") is None or e.get("over") is None]
+    changed = False
+    for e in pend[:6]:                  # max 6 zapytań na odświeżenie
+        tl = timeline(e["betradarId"], 120)
+        if not tl: continue
+        r = settle(e, tl)
+        with PRO_LOCK:
+            for k in ("next", "over", "final"):
+                if r.get(k) and e.get(k) != r[k]: e[k] = r[k]; changed = True
+            if e.get("next") is None and now_ts - e.get("ts", now_ts) > 6 * 3600 and r.get("final") is None:
+                e["next"] = e.get("next") or "nierozliczony"; e["over"] = e.get("over") or "nierozliczony"; changed = True
+    if changed:
+        with PRO_LOCK: pro_save(PRO_LOG)
+
+def pro(vip_res):
+    watch = [dict(w) for w in (vip_res.get("watch") or [])]
+    live_now = {e["eventId"]: e for e in get_list("live")}
+    now = datetime.now(timezone.utc); now_ts = int(now.timestamp())
+    types, near = [], []
+    logged = {e["eventId"] for e in PRO_LOG}
+    for w in watch:
+        cur = live_now.get(w["eventId"])
+        w["live"] = bool(cur)
+        if not cur: continue
+        side = "home" if w["side"] == "D" else "away"
+        w["minutes"], w["score"] = cur.get("minutes"), cur.get("score")
+        o = cur.get("o1") if side == "home" else cur.get("o2")
+        w["odds_live"] = o if o is not None else "brak danych"
+        det = live_details(w["betradarId"]); tl = timeline(w["betradarId"])
+        minute = tl_minute(tl)
+        if minute is None: minute = to_int(str(cur.get("minutes") or "").split("+")[0].replace("'", ""))
+        h, a = tl_score(tl) if tl else tuple((to_int(x) or 0) for x in (cur.get("score") or "0:0").split(":")[:2])
+        pr = pressure(tl, side, minute) if tl else {"fav_on": 0, "riv_on": 0, "fav_cor": 0, "riv_cor": 0, "from": None, "to": minute}
+        ok, c = pro_trigger(det, pr, side, minute, "%d:%d" % (h, a))
+        w.update(minute=minute, score="%d:%d" % (h, a), pressure=pr, live_checks=c, missing=sum(1 for x in c if not x["ok"]))
+        if ok:
+            tot = h + a
+            w["markets"] = ["Następny gol: %s" % w["team"], "Powyżej %d,5 goli" % tot]
+            types.append(w)
+            if w["eventId"] not in logged:
+                with PRO_LOCK:
+                    PRO_LOG.append({"eventId": w["eventId"], "betradarId": w["betradarId"], "match": w["match"], "team": w["team"],
+                                    "side_key": side, "minute": minute, "score_h": h, "score_a": a, "goals": tot,
+                                    "over_line": "%d,5" % tot, "ts": now_ts, "time_warsaw": to_warsaw(now).strftime("%Y-%m-%d %H:%M"),
+                                    "odds": o, "next": None, "over": None, "final": None})
+                    del PRO_LOG[:-300]
+                    pro_save(PRO_LOG)
+                logged.add(w["eventId"])
+        else:
+            near.append({"match": w["match"], "team": w["team"], "minute": minute, "score": w["score"], "missing": w["missing"],
+                         "failed": [x["name"] for x in c if not x["ok"]]})
+    pro_settle_pending(now_ts)
+    with PRO_LOCK: log = [dict(e) for e in PRO_LOG]
+    return {"generated_warsaw": to_warsaw(now).strftime("%Y-%m-%d %H:%M:%S"), "rules": PRO_RULES,
+            "watch": watch, "watch_live": sum(1 for w in watch if w.get("live")), "types": types, "near": sorted(near, key=lambda x: x["missing"]),
+            "message": None if types else "Brak typów w tej chwili",
+            "record": record_stats(log), "log": list(reversed(log))[:40],
+            "notes": ["Typy to spełnione kryteria, nie gwarancja.", "Rejestr zeruje się po restarcie serwera."]}
+
+PRO_STATE = {"res": None, "t": 0, "job": False}
+PRO_TTL = 45
+
+def _pro_worker(vres):
+    try:
+        res = pro(vres)
+        with LOCK: PRO_STATE.update(res=res, t=time.time())
+    except Exception as e:
+        ERRORS["pro"] = "%s: %s" % (type(e).__name__, e)
+    finally:
+        with LOCK: PRO_STATE["job"] = False
+
+def get_pro():
+    v = get_vip()
+    with LOCK:
+        res, t, job = PRO_STATE["res"], PRO_STATE["t"], PRO_STATE["job"]
+        fresh = res is not None and time.time() - t < PRO_TTL
+        if not fresh and not job and v.get("status") == "ready":
+            PRO_STATE["job"] = True
+            threading.Thread(target=_pro_worker, args=(v,), daemon=True).start()
+    if res is not None:
+        out = dict(res); out["status"] = "ready"; out["stale"] = not fresh; out["age_seconds"] = round(time.time() - t)
+        out["errors"] = dict(ERRORS); return out
+    return {"status": "computing", "stage": v.get("stage") or "pro", "progress": v.get("progress") or {}, "errors": dict(ERRORS)}
 
 # ---------- ranking w tle (single-flight + cache) ----------
 TTL = {"live": 180, "prematch": 600, "all": 180}
@@ -614,6 +856,9 @@ class H(BaseHTTPRequestHandler):
             return self.send(200, "ok", "text/plain")
         if u.path == "/api/vip":
             try: return self.send(200, json.dumps(get_vip(), ensure_ascii=False), "application/json; charset=utf-8")
+            except Exception as e: return self.send(500, json.dumps({"error": str(e)}), "application/json")
+        if u.path == "/api/pro":
+            try: return self.send(200, json.dumps(get_pro(), ensure_ascii=False), "application/json; charset=utf-8")
             except Exception as e: return self.send(500, json.dumps({"error": str(e)}), "application/json")
         if u.path == "/api/ranking":
             q = dict(urllib.parse.parse_qsl(u.query))

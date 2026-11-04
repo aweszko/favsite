@@ -144,5 +144,55 @@ class T3(unittest.TestCase):
         self.assertIn('data-v="vip"', app.HTML); self.assertIn("Najostrzejsze typy – żadna pewność", app.HTML)
         self.assertNotIn("100% pewniak", app.HTML)
 
+def EV(typ, t, team, res=None, **kw):
+    e = {"type": typ, "time": t, "team": team, "disabled": 0}
+    if res: e["result"] = {"home": res[0], "away": res[1]}
+    e.update(kw); return e
+
+TL_LIVE = {"match": {"result": {"home": 1, "away": 0}, "status": {"_id": 7}}, "events": [   # PRZYKŁADOWE
+    EV("goal", 12, "home", (1, 0)), EV("shotontarget", 30, "away"), EV("corner", 52, "home"),
+    EV("shotontarget", 55, "home"), EV("corner", 58, "home"), EV("shotontarget", 59, "home"),
+    EV("shotontarget", 45, "away"), EV("shotontarget", 60, "home", disabled=1), EV("shotofftarget", 60, "away")]}
+
+class TPro(unittest.TestCase):
+    def test_pressure_window(self):
+        p = app.pressure(TL_LIVE, "home")
+        self.assertEqual(p["to"], 60); self.assertEqual(p["from"], 50)
+        self.assertEqual((p["fav_on"], p["fav_cor"], p["riv_on"], p["riv_cor"]), (2, 2, 0, 0))
+        q = app.pressure(TL_LIVE, "away"); self.assertEqual((q["fav_on"], q["riv_on"]), (0, 2))
+    def test_pressure_alt_rule(self):
+        ok, c = app.pro_trigger({"on": (5, 1), "cor": (6, 2), "da": (40, 20)}, {"fav_on": 1, "fav_cor": 2, "riv_on": 0}, "home", 60, "1:0")
+        self.assertTrue(ok)
+        ok, _ = app.pro_trigger({"on": (5, 1), "cor": (6, 2), "da": (40, 20)}, {"fav_on": 1, "fav_cor": 1, "riv_on": 0}, "home", 60, "1:0")
+        self.assertFalse(ok)
+    def test_trigger_dominance(self):
+        pr = {"fav_on": 2, "fav_cor": 0, "riv_on": 0}
+        det = {"on": (1, 5), "cor": (2, 6), "da": (25, 40)}   # faworyt = gość
+        self.assertTrue(app.pro_trigger(det, pr, "away", 50, "0:0")[0])
+        self.assertFalse(app.pro_trigger(det, pr, "away", 85, "0:0")[0])            # po 80'
+        self.assertFalse(app.pro_trigger(det, pr, "away", 9, "0:0")[0])             # przed 10'
+        self.assertFalse(app.pro_trigger({"on": (2, 5), "cor": (2, 6), "da": (25, 40)}, pr, "away", 50, "0:0")[0])  # rywal 2 celne
+        self.assertFalse(app.pro_trigger({"on": (1, 5), "cor": (2, 6), "da": (31, 40)}, pr, "away", 50, "0:0")[0])  # DA < +10
+        self.assertFalse(app.pro_trigger(det, {"fav_on": 2, "riv_on": 1}, "away", 50, "0:0")[0])                     # rywal celny w oknie
+        self.assertFalse(app.pro_trigger(None, pr, "away", 50, "0:0")[0])                                             # brak danych
+    def test_settle(self):
+        e = {"side_key": "home", "score_h": 1, "score_a": 0}
+        self.assertEqual(app.settle(e, TL_LIVE), {"final": None})                    # trwa, bez gola
+        tl = {"match": {"result": {"home": 2, "away": 1}, "status": {"_id": 100}},
+              "events": TL_LIVE["events"] + [EV("goal", 70, "home", (2, 0)), EV("goal", 80, "away", (2, 1))]}
+        self.assertEqual(app.settle(e, tl), {"next": "hit", "over": "hit", "final": "2:1"})
+        tl2 = {"match": {"result": {"home": 1, "away": 1}, "status": {"_id": 100}}, "events": [EV("goal", 70, "away", (1, 1))]}
+        self.assertEqual(app.settle(e, tl2)["next"], "miss"); self.assertEqual(app.settle(e, tl2)["over"], "hit")
+        tl3 = {"match": {"result": {"home": 1, "away": 0}, "status": {"_id": 100}}, "events": []}
+        self.assertEqual(app.settle(e, tl3), {"next": "miss", "over": "miss", "final": "1:0"})   # brak następnego gola
+    def test_streaks_and_record(self):
+        s = app.streaks(["hit", "hit", "hit", "miss", "hit", "hit"])
+        self.assertEqual((s["current"], s["current_kind"], s["longest_hit"]), (2, "hit", 3))
+        r = app.record_stats([{"next": "hit", "over": "hit"}, {"next": "miss", "over": None}, {"next": None, "over": None}])
+        self.assertEqual((r["next"]["types"], r["next"]["hits"], r["next"]["misses"], r["next"]["pending"], r["next"]["hit_rate"]), (3, 1, 1, 1, 50.0))
+    def test_pro_tab_html(self):
+        self.assertIn('data-v="pro"', app.HTML); self.assertIn("nie gwarancja", app.HTML)
+        self.assertIn("Rejestr zeruje się po restarcie serwera", app.HTML); self.assertIn("Lista obserwowanych", app.HTML)
+
 if __name__ == "__main__":
     unittest.main()

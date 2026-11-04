@@ -49,10 +49,15 @@ input:focus,button:focus-visible{outline:2px solid var(--g);outline-offset:1px}.
 .vnote{margin:8px 8px 0;padding:8px 12px;border:1px solid #5c4a1a;border-left:3px solid var(--b2);border-radius:10px;background:#16130b;color:var(--g3);font-size:12px}
 .ck{width:100%;border-collapse:collapse;font-size:12px}.ck td{padding:4px 8px;border-top:1px solid #20232a}.ck td.n{color:var(--sv)}.ck td.r{text-align:right;white-space:nowrap}
 .ok{color:#5fd38a;font-weight:700}.no{color:#ff6b6b;font-weight:700}.vt{border-radius:8px;padding:1px 8px;font-weight:700;font-size:11px;background:var(--b);color:var(--g3)}
-@media(min-width:900px){#vip{max-width:900px;margin:0 auto}}
+@media(min-width:900px){#vip,#pro{max-width:900px;margin:0 auto}}
+.main .pb{background:linear-gradient(135deg,#0b0b0b,#1c1608);border-color:#c9a227;color:#f3d77a}
+#pro{background:#050505}#pro .card{background:#0c0b08;border-color:#4a3c12}#pro h3{color:#e8c55a;font-size:15px;margin:14px 10px 6px;letter-spacing:.5px}
+.mk{display:inline-block;margin:6px 4px 0 0;padding:4px 10px;border-radius:12px;background:#c9a227;color:#000;font-weight:700;font-size:13px}
+.rs{display:grid;grid-template-columns:repeat(3,1fr);gap:6px;padding:8px}.rs div{background:#12100a;border:1px solid #4a3c12;border-radius:10px;padding:8px;text-align:center;color:#f3d77a}.rs b{display:block;font-size:18px}.rs small{color:#a99c74;font-size:11px}
+.wl{padding:8px 12px;border-top:1px solid #2a2310;font-size:13px;color:#ddd}.wl small{color:#a99c74}
 </style></head><body>
 <header><div class="top"><div class="brand"><img src="/icon.png" alt="Triumfator – herb" width="48" height="48"><div class="tx"><h1>Triumfator</h1><div class="sub">Porównywarka statystyk piłkarskich</div></div></div><span id="clk" class="tm"></span></div>
-<div class="main"><button data-v="list" class="on">Mecze</button><button data-v="rank">Ranking</button><button data-v="vip">VIP</button></div>
+<div class="main"><button data-v="list" class="on">Mecze</button><button data-v="rank">Ranking</button><button data-v="vip">VIP</button><button data-v="pro" class="pb">Pewniaki PRO</button></div>
 <div class="tabs" id="tabs"></div></header>
 <div id="st">Ładowanie…</div>
 <div id="list"></div>
@@ -62,6 +67,7 @@ input:focus,button:focus-visible{outline:2px solid var(--g);outline-offset:1px}.
 <label>kurs do<input id="omax" type="number" step="0.05" value="2.00" inputmode="decimal"></label></div>
 <div id="rk"></div></div>
 <div id="vip" hidden><div class="vnote">VIP · Najostrzejsze typy – żadna pewność, tylko spełnione kryteria · bez progu kursu (faworyt 1,00–2,00) · LIVE: pełna dominacja</div><div id="vp"></div></div>
+<div id="pro" hidden><div class="vnote">Pewniaki PRO · Etap 1: lista obserwowanych (kryteria ost. 5) · Etap 2: typ dopiero LIVE przy pełnej dominacji i presji w ost. 10 min · <b>Typy to spełnione kryteria, nie gwarancja</b></div><div id="pp"></div></div>
 <footer>Źródła: Superbet PL (oferta, kursy 1X2), Sportradar (statystyki strzałów). Godziny: Europe/Warsaw. Brak danych = „brak danych”, nic nie jest szacowane.</footer>
 <script>
 const $=s=>document.querySelector(s);let view='list',tab='live',rmode='all',M=null,R=null,open={};
@@ -72,7 +78,7 @@ function addDay(s,n){const d=new Date(s+'T12:00:00Z');d.setUTCDate(d.getUTCDate(
 function listTabs(){if(!M)return[];const t=M.today_warsaw,now=M.now_ts,L=M.matches,pre=L.filter(m=>m.mode!='live');
 const T=[['live','Live',L.filter(m=>m.mode=='live')],['h1','Za 1 godz.',pre.filter(m=>m.ts-now<=36e5)],['h3','Za 3 godz.',pre.filter(m=>m.ts-now<=108e5)],['d0','Dziś',pre.filter(m=>m.day_warsaw==t)],['d1','Jutro',pre.filter(m=>m.day_warsaw==addDay(t,1))]];
 for(let i=2;i<7;i++){const d=addDay(t,i),dd=new Date(d+'T12:00:00Z');T.push(['d'+i,DN[dd.getUTCDay()]+' '+d.slice(8)+'.'+d.slice(5,7),pre.filter(m=>m.day_warsaw==d)])}return T}
-function drawTabs(){const el=$('#tabs');if(view=='vip'){el.innerHTML='';return}if(view=='list'){el.innerHTML=listTabs().map(([k,n,a])=>`<button data-t="${k}" class="${k==tab?'on':''}">${n}<span class="cnt">${a.length}</span></button>`).join('')}
+function drawTabs(){const el=$('#tabs');if(view=='vip'||view=='pro'){el.innerHTML='';return}if(view=='list'){el.innerHTML=listTabs().map(([k,n,a])=>`<button data-t="${k}" class="${k==tab?'on':''}">${n}<span class="cnt">${a.length}</span></button>`).join('')}
 else el.innerHTML=[['live','Live'],['prematch','Przedmeczowe (dziś)'],['all','Wszystkie']].map(([k,n])=>`<button data-r="${k}" class="${k==rmode?'on':''}">${n}</button>`).join('');
 el.querySelectorAll('[data-t]').forEach(b=>b.onclick=()=>{tab=b.dataset.t;drawTabs();drawList();scrollTo(0,0)});
 el.querySelectorAll('[data-r]').forEach(b=>b.onclick=()=>{rmode=b.dataset.r;drawTabs();loadRank()})}
@@ -112,9 +118,10 @@ let rt=null;async function loadRank(){clearTimeout(rt);if(!R||R.status!='computi
 const q=new URLSearchParams({mode:rmode,min_games:$('#mg').value,odds_min:$('#omin').value.replace(',','.'),odds_max:$('#omax').value.replace(',','.')});
 try{R=await (await fetch('/api/ranking?'+q)).json();drawRank();if(R.status=='computing'&&view=='rank')rt=setTimeout(loadRank,4000)}catch(e){$('#st').innerHTML='<span class="err">Błąd: '+esc(e)+'</span>';rt=setTimeout(loadRank,5000)}}
 document.querySelectorAll('[data-v]').forEach(b=>b.onclick=()=>{view=b.dataset.v;document.querySelectorAll('[data-v]').forEach(x=>x.classList.toggle('on',x==b));
-$('#list').hidden=view!='list';$('#rank').hidden=view!='rank';$('#vip').hidden=view!='vip';drawTabs();if(view=='rank'){R?drawRank():loadRank()}else if(view=='vip'){V?drawVip():0;loadVip()}else if(M)status(M)});
+$('#list').hidden=view!='list';$('#rank').hidden=view!='rank';$('#vip').hidden=view!='vip';$('#pro').hidden=view!='pro';drawTabs();if(view=='pro'){P?drawPro():0;loadPro()}else if(view=='rank'){R?drawRank():loadRank()}else if(view=='vip'){V?drawVip():0;loadVip()}else if(M)status(M)});
 ['#mg','#omin','#omax'].forEach(s=>$(s).onchange=loadRank);
 setInterval(()=>{$('#clk').textContent=new Date().toLocaleTimeString('pl-PL',{timeZone:'Europe/Warsaw',hour:'2-digit',minute:'2-digit'})},1000);
+if(location.hash=='#pro')document.querySelector('[data-v=pro]').click();
 if(location.hash=='#vip')document.querySelector('[data-v=vip]').click();
 if(location.hash=='#ranking')document.querySelector('[data-v=rank]').click();
 loadList();setInterval(()=>view=='list'?loadList():view=='rank'?loadRank():0,60000);
@@ -129,4 +136,21 @@ if(V.error){$('#vp').innerHTML='<div class="empty err">Błąd: '+esc(V.error)+'<
 $('#vp').innerHTML=(V.picks.length?V.picks.map(vcard).join(''):'<div class="empty">Brak pewniaków - żaden mecz nie spełnia wszystkich kryteriów</div>')+`<div class="empty" style="padding:10px">Sprawdzonych par 5/5: ${V.checked} · odrzuconych: ${V.rejected} · dane rankingu: ${esc(V.ranking_generated_warsaw||'')}</div>`;status(V)}
 async function loadVip(){clearTimeout(vt);try{V=await (await fetch('/api/vip')).json();drawVip()}catch(e){$('#st').innerHTML='<span class="err">Błąd: '+esc(e)+'</span>'}
 if(view=='vip')vt=setTimeout(loadVip,V&&V.status=='computing'?5000:75000)}
+let P=null,pt=null;
+const RES={hit:'<span class="ok">trafiony</span>',miss:'<span class="no">nietrafiony</span>',nierozliczony:'<span class="n">nierozliczony</span>'};
+const rr=x=>x?(RES[x]||esc(x)):'<span class="n">w toku</span>';
+const ckt=cs=>`<table class="ck"><tr><td class="n">Kryterium</td><td class="r n">faw.</td><td class="r n">rywal</td><td class="r n">wymóg</td><td></td></tr>${cs.map(c=>`<tr><td>${esc(c.name)}</td><td class="r">${fv(c.fav)}</td><td class="r">${fv(c.riv)}</td><td class="r n">${esc(c.need)}</td><td class="${c.ok?'ok':'no'}">${c.ok?'✓':'✗'}</td></tr>`).join('')}</table>`;
+function pcard(w){const p=w.pressure||{};return `<div class="card"><div class="ch"><span><span class="vt">TYP LIVE</span> ${esc([w.category,w.tournament].filter(Boolean).join(' · '))}</span><b style="color:#ff5c75">● ${fv(w.minute)}' ${esc(w.score)}</b></div>
+<div style="padding:8px 12px"><div class="nm" style="color:#f3d77a;font-weight:700">${esc(w.match)}</div><div>Faworyt: <b>${esc(w.team)}</b> · kurs 1X2 live: ${fv(w.odds_live)}</div>
+${(w.markets||[]).map(m=>`<span class="mk">${esc(m)}</span>`).join('')}<div style="font-size:12px;color:#a99c74;margin-top:6px">Ost. 10 min (${fv(p.from)}'–${fv(p.to)}'): faw. ${p.fav_on} celne, ${p.fav_cor} rożne · rywal ${p.riv_on} celne, ${p.riv_cor} rożne</div></div>${ckt(w.live_checks)}</div>`}
+function rstat(t,s){return `<h3>${t}</h3><div class="rs"><div><b>${s.types}</b><small>typów</small></div><div><b class="ok">${s.hits}</b><small>trafione</small></div><div><b class="no">${s.misses}</b><small>nietrafione</small></div><div><b>${s.pending}</b><small>w toku</small></div><div><b>${s.hit_rate==null?'–':f(s.hit_rate,1)+'%'}</b><small>skuteczność</small></div><div><b>${s.current?(s.current+' '+(s.current_kind=='hit'?'✓':'✗')):'–'}</b><small>seria (najdł. ✓ ${s.longest_hit})</small></div></div>`}
+function drawPro(){if(!P)return;if(P.status=='computing'){const p=P.progress||{};$('#pp').innerHTML='<div class="empty">Liczę listę obserwowanych'+(p.total?' ('+(p.done||0)+'/'+p.total+')':'')+'… Pierwsze liczenie może potrwać kilka minut.</div>';return}
+if(P.error){$('#pp').innerHTML='<div class="empty err">Błąd: '+esc(P.error)+'</div>';return}
+let h='<h3>Typy LIVE</h3>'+(P.types.length?P.types.map(pcard).join(''):`<div class="empty">Brak typów w tej chwili · obserwowane mecze LIVE: ${P.watch_live}</div>`+P.near.map(n=>`<div class="wl">${esc(n.match)} <small>● ${fv(n.minute)}' ${esc(n.score)} · brakuje ${n.missing}: ${esc(n.failed.join(', '))}</small></div>`).join(''));
+h+=`<h3>Lista obserwowanych (${P.watch.length})</h3>`+(P.watch.length?P.watch.map(w=>`<div class="wl"><b style="color:#f3d77a">${esc(w.team)}</b> <small>(${w.side=='D'?'gosp.':'gość'}) vs ${esc(w.opponent)} · ${esc(w.tournament||'')}</small><br><small>${w.live?'<span style="color:#ff5c75">● LIVE '+fv(w.minute)+"' "+esc(w.score||'')+'</span>':'start '+esc(w.start_warsaw)} · kurs ${fv(w.odds_now)} · ${esc(w.summary)}</small></div>`).join(''):'<div class="empty">Brak meczów spełniających kryteria ost. 5 dzisiaj</div>');
+h+='<h3>Rejestr</h3><div class="vnote">Rejestr zeruje się po restarcie serwera. Rozliczenie automatyczne z przebiegu meczu (Sportradar).</div>'+rstat('Następny gol faworyta',P.record.next)+rstat('Powyżej X,5 goli',P.record.over);
+h+=P.log.length?P.log.map(e=>`<div class="wl">${esc(e.time_warsaw)} · <b>${esc(e.match)}</b><br><small>${esc(e.team)} · ${fv(e.minute)}' przy ${e.score_h}:${e.score_a}${e.final?' · koniec '+esc(e.final):''}</small><br><small>Następny gol: ${rr(e.next)} · Powyżej ${esc(e.over_line)}: ${rr(e.over)}</small></div>`).join(''):'<div class="empty">Brak zapisanych typów</div>';
+$('#pp').innerHTML=h+`<div class="empty" style="padding:10px">Typy to spełnione kryteria, nie gwarancja · stan: ${esc(P.generated_warsaw)}</div>`;status(P)}
+async function loadPro(){clearTimeout(pt);try{P=await (await fetch('/api/pro')).json();drawPro()}catch(e){$('#st').innerHTML='<span class="err">Błąd: '+esc(e)+'</span>'}
+if(view=='pro')pt=setTimeout(loadPro,P&&P.status=='computing'?5000:50000)}
 </script></body></html>

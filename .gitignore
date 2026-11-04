@@ -6,3 +6,4 @@ venv/
 *.log
 favsite.zip
 .DS_Store
+pro_log.json
