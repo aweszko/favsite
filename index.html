@@ -61,7 +61,7 @@ input:focus,button:focus-visible{outline:2px solid var(--g);outline-offset:1px}.
 <label>kurs od<input id="omin" type="number" step="0.05" value="1.20" inputmode="decimal"></label>
 <label>kurs do<input id="omax" type="number" step="0.05" value="2.00" inputmode="decimal"></label></div>
 <div id="rk"></div></div>
-<div id="vip" hidden><div class="vnote">VIP · Najostrzejsze typy – żadna pewność, tylko spełnione kryteria</div><div id="vp"></div></div>
+<div id="vip" hidden><div class="vnote">VIP · Najostrzejsze typy – żadna pewność, tylko spełnione kryteria · bez progu kursu (faworyt 1,00–2,00) · LIVE: pełna dominacja</div><div id="vp"></div></div>
 <footer>Źródła: Superbet PL (oferta, kursy 1X2), Sportradar (statystyki strzałów). Godziny: Europe/Warsaw. Brak danych = „brak danych”, nic nie jest szacowane.</footer>
 <script>
 const $=s=>document.querySelector(s);let view='list',tab='live',rmode='all',M=null,R=null,open={};
@@ -122,7 +122,7 @@ let V=null,vt=null;
 const fv=x=>x==null?'–':typeof x=='number'?f(x,x%1?2:0):esc(x);
 function vcard(r){const when=r.vip_type=='live'?`<span style="color:#ff5c75">● ${r.minutes!=null?esc(r.minutes)+"'":'LIVE'} ${esc(r.score||'')}</span>`:esc(r.start_warsaw);
 return `<div class="card"><div class="ch"><span><span class="vt">${r.vip_type=='live'?'LIVE':'przedmeczowy'}</span> ${esc([r.category,r.tournament].filter(Boolean).join(' · '))}</span><b>${when}</b></div>
-<div class="vs"><div class="c fav"><div class="tag">FAWORYT (${r.side=='D'?'gospodarz':'gość'})</div><div class="nm">${esc(r.team)}</div><div class="v">${f(r.odds_now)}</div></div><div class="mid">vs<br>X ${f(r.odds_draw)}</div><div class="c riv"><div class="tag">RYWAL</div><div class="nm">${esc(r.opponent)}</div><div class="v">${f(r.odds_other)}</div></div></div>
+<div class="vs"><div class="c fav"><div class="tag">FAWORYT (${r.side=='D'?'gospodarz':'gość'})</div><div class="nm">${esc(r.team)}</div><div class="v">${r.odds_now==null?'brak danych':f(r.odds_now)}</div></div><div class="mid">vs<br>X ${f(r.odds_draw)}</div><div class="c riv"><div class="tag">RYWAL</div><div class="nm">${esc(r.opponent)}</div><div class="v">${f(r.odds_other)}</div></div></div>
 <table class="ck"><tr><td class="n">Kryterium</td><td class="r n">faw.</td><td class="r n">rywal</td><td class="r n">wymóg</td><td></td></tr>${r.checks.map(c=>`<tr><td>${esc(c.name)}</td><td class="r">${fv(c.fav)}</td><td class="r">${fv(c.riv)}</td><td class="r n">${esc(c.need)}</td><td class="${c.ok?'ok':'no'}">${c.ok?'✓':'✗'}</td></tr>`).join('')}</table></div>`}
 function drawVip(){if(!V)return;if(V.status=='computing'){const p=V.progress||{};$('#vp').innerHTML='<div class="empty">'+(V.stage=='ranking'?'Liczę ranking ('+(p.done||0)+'/'+(p.total||'?')+')…':'Sprawdzam kryteria VIP…')+' Pierwsze liczenie może potrwać kilka minut.</div>';return}
 if(V.error){$('#vp').innerHTML='<div class="empty err">Błąd: '+esc(V.error)+'</div>';return}

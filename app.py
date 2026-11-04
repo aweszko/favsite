@@ -357,7 +357,9 @@ def ranking(mode="all", min_games=3, odds_min=1.2, odds_max=2.0, sort_key="sum_o
 
 # ---------- VIP: najostrzejsze typy (czysta logika + liczenie w tle) ----------
 VIP_RULES = {
-    "odds_min": 1.60,                 # reguła użytkownika: kurs na typ >= 1,60
+    "odds_min": 1.00,                 # reguła użytkownika: brak progu kursu (typuje rynki goli)
+    "odds_range": (1.00, 2.00),       # zakres kursu faworyta dla kandydatów VIP
+    "live_dom": {"on_diff": 2, "on_riv_max": 1, "da_ratio": 1.3, "da_diff": 10},
     "games": 5,                       # ściśle 5/5 meczów z danymi dla obu drużyn
     "live":     {"on": 1.5, "tot": 3.0, "cor": 1.0, "pts": 9},
     "prematch": {"on": 2.0, "tot": 4.0, "cor": 1.5, "pts": 10},
@@ -409,7 +411,7 @@ def vip_check(r, cur_odds, live_det, table_f, table_o):
     n = VIP_RULES["games"]
     sub = lambda a, b: None if a is None or b is None else round(a - b, 2)
     c = []
-    c.append(_chk("Kurs na faworyta ≥ 1,60", cur_odds is not None and cur_odds >= VIP_RULES["odds_min"] - 1e-9, cur_odds, None, "≥ 1,60"))
+    c.append(_chk("Kurs na faworyta (bez progu)", True, cur_odds if cur_odds is not None else "brak danych", None, "dowolny"))
     c.append(_chk("Mecze z danymi 5/5 (obie drużyny)",
                   (st.get("games_with_data") or 0) >= n and (os_.get("games_with_data") or 0) >= n
                   and ff["cor_games"] >= n and fo["cor_games"] >= n,
@@ -433,10 +435,21 @@ def vip_check(r, cur_odds, live_det, table_f, table_o):
     if live:
         ld = live_det or {}
         side = 0 if r.get("side") == "D" else 1
-        for k, lab in (("on", "LIVE: celne w meczu"), ("cor", "LIVE: rożne w meczu"), ("da", "LIVE: groźne ataki")):
+        ld_ = VIP_RULES["live_dom"]
+        def lv(k):
             p = ld.get(k)
-            fa, rv = (p[side], p[1 - side]) if p else ("brak danych", "brak danych")
-            c.append(_chk(lab, p is not None and fa >= rv, fa, rv, "faworyt ≥ rywal"))
+            return (p[side], p[1 - side]) if p else (None, None)
+        fa, rv = lv("on")
+        c.append(_chk("LIVE: celne w meczu", fa is not None and fa >= rv + ld_["on_diff"] and rv <= ld_["on_riv_max"],
+                      fa if fa is not None else "brak danych", rv if rv is not None else "brak danych",
+                      "faw. ≥ rywal + %d i rywal ≤ %d" % (ld_["on_diff"], ld_["on_riv_max"])))
+        fa, rv = lv("cor")
+        c.append(_chk("LIVE: rożne w meczu", fa is not None and fa > rv,
+                      fa if fa is not None else "brak danych", rv if rv is not None else "brak danych", "faw. > rywal"))
+        fa, rv = lv("da")
+        c.append(_chk("LIVE: groźne ataki", fa is not None and fa >= ld_["da_ratio"] * rv - 1e-9 and fa >= rv + ld_["da_diff"],
+                      fa if fa is not None else "brak danych", rv if rv is not None else "brak danych",
+                      "faw. ≥ 1,3× rywal i ≥ rywal + %d" % ld_["da_diff"]))
     return c
 
 def live_details(br):
@@ -471,7 +484,7 @@ def vip(rank_res):
             r["odds_now"] = o
         else:
             r["odds_now"] = r.get("odds_fav")
-        if r["odds_now"] is None or r["odds_now"] < VIP_RULES["odds_min"]: rejected += 1; continue
+        if r["odds_now"] is not None and r["odds_now"] < VIP_RULES["odds_min"] - 1e-9: rejected += 1; continue
         ld = live_details(r["betradarId"]) if r["mode"] == "live" else None
         tf = table_row(r.get("season"), r.get("uid")); to = table_row(r.get("season"), r.get("opp_uid"))
         c = vip_check(r, r["odds_now"], ld, tf, to)
@@ -499,7 +512,7 @@ def _vip_worker(rank_res):
         with LOCK: VIP_STATE["job"] = False
 
 def get_vip():
-    rk = get_ranking("all")                  # reużywa danych rankingu (bez podwójnego pobierania)
+    rk = get_ranking("all", 3, *VIP_RULES["odds_range"])   # kursy 1,00-2,00; reużywa danych rankingu (bez podwójnego pobierania)
     with LOCK:
         res, t, job = VIP_STATE["res"], VIP_STATE["t"], VIP_STATE["job"]
         fresh = res is not None and time.time() - t < VIP_TTL

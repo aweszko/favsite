@@ -96,11 +96,32 @@ class T3(unittest.TestCase):
     TF = {"pos": 2, "of": 18, "played": 10, "gf": 20, "gpm": 2.0}
     TO = {"pos": 15, "of": 18, "played": 10, "gf": 8, "gpm": 0.8}
     def test_vip_all_pass_live(self):
-        c = app.vip_check(self._vrow(), 1.7, {"on": (4, 1), "cor": (3, 3), "da": (40, 20)}, self.TF, self.TO)
+        c = app.vip_check(self._vrow(), 1.7, {"on": (4, 1), "cor": (4, 3), "da": (40, 20)}, self.TF, self.TO)
         self.assertTrue(all(x["ok"] for x in c), [x for x in c if not x["ok"]])
-    def test_vip_odds_below_160(self):
-        c = app.vip_check(self._vrow(), 1.55, {"on": (4, 1), "cor": (3, 3), "da": (40, 20)}, self.TF, self.TO)
-        self.assertFalse(c[0]["ok"])
+    LD = {"on": (4, 1), "cor": (4, 3), "da": (40, 20)}
+    def _ok(self, ld, odds=1.7):
+        return all(x["ok"] for x in app.vip_check(self._vrow(), odds, ld, self.TF, self.TO))
+    def test_vip_low_odds_ok(self):
+        self.assertTrue(self._ok(self.LD, 1.05)); self.assertTrue(self._ok(self.LD, None))
+        c = app.vip_check(self._vrow(), None, self.LD, self.TF, self.TO)
+        self.assertEqual(c[0]["fav"], "brak danych")
+        self.assertEqual(app.VIP_RULES["odds_range"], (1.0, 2.0))
+    def test_vip_live_on_target(self):
+        self.assertTrue(self._ok(dict(self.LD, on=(3, 1))))
+        self.assertTrue(self._ok(dict(self.LD, on=(2, 0))))
+        self.assertFalse(self._ok(dict(self.LD, on=(2, 1))))   # tylko +1
+        self.assertFalse(self._ok(dict(self.LD, on=(5, 2))))   # rywal > 1
+    def test_vip_live_corners_strict(self):
+        self.assertFalse(self._ok(dict(self.LD, cor=(3, 3))))
+        self.assertTrue(self._ok(dict(self.LD, cor=(1, 0))))
+    def test_vip_live_dangerous(self):
+        self.assertTrue(self._ok(dict(self.LD, da=(33, 23))))   # 1,43x i +10
+        self.assertFalse(self._ok(dict(self.LD, da=(29, 20))))  # +9
+        self.assertFalse(self._ok(dict(self.LD, da=(60, 50))))  # 1,2x
+    def test_vip_live_partial_missing(self):
+        self.assertFalse(self._ok({"on": (4, 1), "cor": (4, 3), "da": None}))
+        c = app.vip_check(self._vrow(), 1.7, {"on": None, "cor": None, "da": None}, self.TF, self.TO)
+        self.assertIn("rywal + 2", [x["need"] for x in c if x["name"] == "LIVE: celne w meczu"][0])
     def test_vip_live_stats_missing(self):
         c = app.vip_check(self._vrow(), 1.7, None, self.TF, self.TO)
         self.assertFalse(all(x["ok"] for x in c))
@@ -117,7 +138,7 @@ class T3(unittest.TestCase):
         self.assertFalse(all(x["ok"] for x in app.vip_check(self._vrow("prematch"), 1.7, None, bad, self.TO)))
     def test_vip_four_of_five_rejected(self):
         r = self._vrow(); r["games"][0]["on"] = None; r["games"][0]["tot"] = None; r["stats"] = app.compute_stats(r["games"])
-        c = app.vip_check(r, 1.7, {"on": (4, 1), "cor": (3, 3), "da": (40, 20)}, self.TF, self.TO)
+        c = app.vip_check(r, 1.7, {"on": (4, 1), "cor": (4, 3), "da": (40, 20)}, self.TF, self.TO)
         self.assertFalse(c[1]["ok"])
     def test_vip_html(self):
         self.assertIn('data-v="vip"', app.HTML); self.assertIn("Najostrzejsze typy – żadna pewność", app.HTML)
