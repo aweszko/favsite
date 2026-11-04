@@ -192,7 +192,7 @@ def match_details(mid):
             val = (v.get(k) or {}).get("value") or {}
             h, a = to_int(val.get("home")), to_int(val.get("away"))
             return None if h is None or a is None else (h, a)
-        return {"on": pair("125"), "tot": pair("goalattempts")}
+        return {"on": pair("125"), "tot": pair("goalattempts"), "cor": pair("124"), "da": pair("1029")}
     return cached("det:%s" % mid, 7 * 24 * 3600, f)
 
 def match_info(br):
@@ -204,7 +204,8 @@ def match_info(br):
         cat = d.get("realcategory") or d.get("category") or m.get("_category") or {}
         return {"home": {"uid": (t.get("home") or {}).get("uid"), "name": (t.get("home") or {}).get("name")},
                 "away": {"uid": (t.get("away") or {}).get("uid"), "name": (t.get("away") or {}).get("name")},
-                "tournament": (d.get("tournament") or {}).get("name"), "category": cat.get("name")}
+                "tournament": (d.get("tournament") or {}).get("name"), "category": cat.get("name"),
+                "season": m.get("_seasonid") or (d.get("season") or {}).get("_id")}
     return cached("mi:%s" % br, TEAM_TTL, f)
 
 def team_last5(uid, exclude_br):
@@ -225,7 +226,7 @@ def team_last5(uid, exclude_br):
             gf, ga = (r["home"], r["away"]) if ish else (r["away"], r["home"])
             g = {"date": (x.get("time") or {}).get("date"), "uts": (x.get("time") or {}).get("uts"),
                  "opp": x["teams"]["away" if ish else "home"].get("name"), "ha": "D" if ish else "W",
-                 "score": "%s:%s" % (gf, ga), "on": None, "tot": None}
+                 "score": "%s:%s" % (gf, ga), "gf": to_int(gf), "ga": to_int(ga), "on": None, "tot": None, "cor": None}
             if dd:
                 on, tot = dd.get("on"), dd.get("tot")
                 # same zera przy niezerowym wyniku = brak danych
@@ -233,9 +234,11 @@ def team_last5(uid, exclude_br):
                     on = tot = None
                 if on: g["on"] = on[i]
                 if tot: g["tot"] = tot[i]
+                cor = dd.get("cor")
+                if cor and g["on"] is not None: g["cor"] = cor[i]
             games.append(g)
         return games
-    return cached("team:%s:%s" % (uid, exclude_br), TEAM_TTL, f)
+    return cached("team2:%s:%s" % (uid, exclude_br), TEAM_TTL, f)
 
 # ---------- logika (czysta, testowalna) ----------
 def pick_favourite(o1, o2, odds_min, odds_max, gap=0.5):
@@ -305,6 +308,7 @@ def _process_event(ev, odds_min, odds_max):
            "mode": ev["mode"], "start_warsaw": ev.get("start_warsaw", ""), "day_warsaw": ev.get("day_warsaw"),
            "minutes": ev["minutes"], "score": ev["score"],
            "odds_fav": fav, "odds_other": other, "odds_draw": ev.get("ox"),
+           "season": mi.get("season"), "uid": mi[side]["uid"], "opp_uid": mi[opp]["uid"],
            "eventId": ev["eventId"], "betradarId": ev["br"], "games": games, "stats": st,
            "opp_games": og, "opp_stats": ost, "diff": compare(st, ost)}
     return ("nostats" if st["games_with_data"] == 0 else "ok", row)
@@ -350,6 +354,163 @@ def ranking(mode="all", min_games=3, odds_min=1.2, odds_max=2.0, sort_key="sum_o
                        "favourites": len(rows) + cnt("nobr") + sum(1 for k, r in res if k == "nostats" and not r),
                        "favourites_without_betradar": cnt("nobr"), "without_stats": cnt("nostats")},
             "errors": dict(ERRORS)}
+
+# ---------- VIP: najostrzejsze typy (czysta logika + liczenie w tle) ----------
+VIP_RULES = {
+    "odds_min": 1.60,                 # reguła użytkownika: kurs na typ >= 1,60
+    "games": 5,                       # ściśle 5/5 meczów z danymi dla obu drużyn
+    "live":     {"on": 1.5, "tot": 3.0, "cor": 1.0, "pts": 9},
+    "prematch": {"on": 2.0, "tot": 4.0, "cor": 1.5, "pts": 10},
+    "gpm_min": 1.3,                   # gole faworyta na mecz w tabeli ligowej
+    "table_half": 0.5,                # faworyt w górnej połowie tabeli
+}
+
+def form_stats(games):
+    """Gole, bilans, punkty i rożne z ostatnich meczów (None gdy brak)."""
+    games = games or []
+    gs = [g for g in games if g.get("gf") is not None and g.get("ga") is not None]
+    cor = [g["cor"] for g in games if g.get("cor") is not None]
+    pts = sum(3 if g["gf"] > g["ga"] else 1 if g["gf"] == g["ga"] else 0 for g in gs)
+    return {"games": len(gs), "points": pts if gs else None, "gd": sum(g["gf"] - g["ga"] for g in gs) if gs else None,
+            "gf_avg": round(sum(g["gf"] for g in gs) / len(gs), 2) if gs else None,
+            "cor_games": len(cor), "avg_cor": round(sum(cor) / len(cor), 2) if cor else None}
+
+def table_row(season, uid):
+    """Pozycja i gole/mecz drużyny z tabeli Sportradar; None = brak danych."""
+    if not season or not uid: return None
+    def f():
+        d = gismo("stats_season_tables/%s" % season)
+        if d is None: return None
+        out = {}
+        for t in (d.get("tables") or []) if isinstance(d, dict) else []:
+            rows = t.get("tablerows") or []
+            for r in rows:
+                u = (r.get("team") or {}).get("uid")
+                if u is None or u in out: continue
+                out[u] = {"pos": to_int(r.get("pos")), "of": len(rows), "played": to_int(r.get("total")),
+                          "gf": to_int(r.get("goalsForTotal")), "group": t.get("name")}
+        return out
+    tab = cached("table:%s" % season, 3600, f)
+    if tab is None: return None
+    r = tab.get(uid) or tab.get(str(uid)) or tab.get(to_int(uid))
+    if not r or not r.get("pos") or not r.get("played"): return None
+    r = dict(r); r["gpm"] = round(r["gf"] / r["played"], 2) if r.get("gf") is not None else None
+    return r
+
+def _chk(name, ok, fav, riv, need):
+    return {"name": name, "ok": bool(ok), "fav": fav, "riv": riv, "need": need}
+
+def vip_check(r, cur_odds, live_det, table_f, table_o):
+    """Zwraca listę kryteriów (wszystkie muszą mieć ok=True)."""
+    live = r.get("mode") == "live"
+    th = VIP_RULES["live" if live else "prematch"]
+    st, os_ = r.get("stats") or {}, r.get("opp_stats") or {}
+    ff, fo = form_stats(r.get("games")), form_stats(r.get("opp_games"))
+    n = VIP_RULES["games"]
+    sub = lambda a, b: None if a is None or b is None else round(a - b, 2)
+    c = []
+    c.append(_chk("Kurs na faworyta ≥ 1,60", cur_odds is not None and cur_odds >= VIP_RULES["odds_min"] - 1e-9, cur_odds, None, "≥ 1,60"))
+    c.append(_chk("Mecze z danymi 5/5 (obie drużyny)",
+                  (st.get("games_with_data") or 0) >= n and (os_.get("games_with_data") or 0) >= n
+                  and ff["cor_games"] >= n and fo["cor_games"] >= n,
+                  "%s/5" % min(st.get("games_with_data") or 0, ff["cor_games"]), "%s/5" % min(os_.get("games_with_data") or 0, fo["cor_games"]), "5/5"))
+    for key, lab, a, b in (("on", "Celne śr./mecz (ost. 5)", st.get("avg_on"), os_.get("avg_on")),
+                           ("tot", "Strzały śr./mecz (ost. 5)", st.get("avg_tot"), os_.get("avg_tot")),
+                           ("cor", "Rożne śr./mecz (ost. 5)", ff["avg_cor"], fo["avg_cor"])):
+        d = sub(a, b)
+        c.append(_chk(lab, d is not None and d >= th[key] - 1e-9, a, b, "przewaga ≥ %s" % str(th[key]).replace(".", ",")))
+    c.append(_chk("Forma: punkty (ost. 5)", ff["points"] is not None and fo["points"] is not None
+                  and ff["points"] >= th["pts"] and ff["points"] > fo["points"], ff["points"], fo["points"], "≥ %d i więcej niż rywal" % th["pts"]))
+    c.append(_chk("Bilans bramek (ost. 5)", ff["gd"] is not None and fo["gd"] is not None and ff["gd"] > 0 and ff["gd"] > fo["gd"],
+                  ff["gd"], fo["gd"], "> 0 i lepszy niż rywal"))
+    tf, to = table_f or {}, table_o or {}
+    half = tf.get("of") and tf.get("pos") and tf["pos"] <= max(1, int(tf["of"] * VIP_RULES["table_half"] + 0.5))
+    c.append(_chk("Pozycja w tabeli (górna połowa)", bool(half),
+                  "%s/%s" % (tf["pos"], tf["of"]) if table_f else "brak danych",
+                  "%s/%s" % (to["pos"], to["of"]) if table_o else "brak danych", "górna połowa"))
+    c.append(_chk("Gole faworyta/mecz w lidze", tf.get("gpm") is not None and tf["gpm"] >= VIP_RULES["gpm_min"] - 1e-9,
+                  tf.get("gpm") if table_f else "brak danych", to.get("gpm") if table_o else "brak danych", "≥ 1,3"))
+    if live:
+        ld = live_det or {}
+        side = 0 if r.get("side") == "D" else 1
+        for k, lab in (("on", "LIVE: celne w meczu"), ("cor", "LIVE: rożne w meczu"), ("da", "LIVE: groźne ataki")):
+            p = ld.get(k)
+            fa, rv = (p[side], p[1 - side]) if p else ("brak danych", "brak danych")
+            c.append(_chk(lab, p is not None and fa >= rv, fa, rv, "faworyt ≥ rywal"))
+    return c
+
+def live_details(br):
+    def f():
+        d = gismo("match_detailsextended/%s" % br)
+        if not isinstance(d, dict): return None
+        v = d.get("values") or {}
+        def pair(k):
+            val = (v.get(k) or {}).get("value") or {}
+            h, a = to_int(val.get("home")), to_int(val.get("away"))
+            return None if h is None or a is None else (h, a)
+        return {"on": pair("125"), "cor": pair("124"), "da": pair("1029")}
+    return cached("live:%s" % br, 60, f)
+
+def vip(rank_res):
+    rows = list(rank_res.get("ranking") or []) + list(rank_res.get("too_few") or [])
+    live_now = {e["eventId"]: e for e in get_list("live")}
+    cands = []
+    for r in rows:
+        st, os_ = r.get("stats") or {}, r.get("opp_stats") or {}
+        if (st.get("games_with_data") or 0) < 5 or (os_.get("games_with_data") or 0) < 5: continue   # tani filtr
+        cands.append(r)
+    picks, rejected = [], 0
+    for r in cands:
+        r = dict(r)
+        cur = live_now.get(r["eventId"])
+        if r["mode"] == "live" and not cur: continue                    # mecz już się skończył
+        if r["mode"] != "live" and cur: r["mode"] = "live"
+        if cur:
+            r["minutes"], r["score"] = cur.get("minutes"), cur.get("score")
+            o = cur.get("o1") if r["side"] == "D" else cur.get("o2")
+            r["odds_now"] = o
+        else:
+            r["odds_now"] = r.get("odds_fav")
+        if r["odds_now"] is None or r["odds_now"] < VIP_RULES["odds_min"]: rejected += 1; continue
+        ld = live_details(r["betradarId"]) if r["mode"] == "live" else None
+        tf = table_row(r.get("season"), r.get("uid")); to = table_row(r.get("season"), r.get("opp_uid"))
+        c = vip_check(r, r["odds_now"], ld, tf, to)
+        if all(x["ok"] for x in c):
+            r["checks"] = c; r["vip_type"] = "live" if r["mode"] == "live" else "przedmeczowy"
+            r["form"] = form_stats(r.get("games")); r["opp_form"] = form_stats(r.get("opp_games"))
+            picks.append(r)
+        else: rejected += 1
+    picks.sort(key=lambda r: (r["vip_type"] != "live", -((r["stats"]["avg_on"] or 0) - (r["opp_stats"]["avg_on"] or 0))))
+    now = datetime.now(timezone.utc)
+    return {"generated_warsaw": to_warsaw(now).strftime("%Y-%m-%d %H:%M:%S"), "rules": VIP_RULES, "picks": picks,
+            "checked": len(cands), "rejected": rejected, "ranking_generated_warsaw": rank_res.get("generated_warsaw"),
+            "message": None if picks else "Brak pewniaków - żaden mecz nie spełnia wszystkich kryteriów"}
+
+VIP_TTL = 75
+VIP_STATE = {"res": None, "t": 0, "job": False}
+
+def _vip_worker(rank_res):
+    try:
+        res = vip(rank_res)
+        with LOCK: VIP_STATE.update(res=res, t=time.time())
+    except Exception as e:
+        ERRORS["vip"] = "%s: %s" % (type(e).__name__, e)
+    finally:
+        with LOCK: VIP_STATE["job"] = False
+
+def get_vip():
+    rk = get_ranking("all")                  # reużywa danych rankingu (bez podwójnego pobierania)
+    with LOCK:
+        res, t, job = VIP_STATE["res"], VIP_STATE["t"], VIP_STATE["job"]
+        fresh = res is not None and time.time() - t < VIP_TTL
+        if not fresh and not job and rk.get("status") == "ready":
+            VIP_STATE["job"] = job = True
+            threading.Thread(target=_vip_worker, args=(rk,), daemon=True).start()
+    if res is not None:
+        out = dict(res); out["status"] = "ready"; out["stale"] = not fresh; out["age_seconds"] = round(time.time() - t)
+        out["errors"] = dict(ERRORS); return out
+    return {"status": "computing", "stage": "ranking" if rk.get("status") != "ready" else "vip",
+            "progress": rk.get("progress") or {}, "errors": dict(ERRORS)}
 
 # ---------- ranking w tle (single-flight + cache) ----------
 TTL = {"live": 180, "prematch": 600, "all": 180}
@@ -438,6 +599,9 @@ class H(BaseHTTPRequestHandler):
             return self.send(200, json.dumps(status(), ensure_ascii=False), "application/json; charset=utf-8")
         if u.path == "/healthz":
             return self.send(200, "ok", "text/plain")
+        if u.path == "/api/vip":
+            try: return self.send(200, json.dumps(get_vip(), ensure_ascii=False), "application/json; charset=utf-8")
+            except Exception as e: return self.send(500, json.dumps({"error": str(e)}), "application/json")
         if u.path == "/api/ranking":
             q = dict(urllib.parse.parse_qsl(u.query))
             try:

@@ -88,5 +88,40 @@ class T3(unittest.TestCase):
     def test_html_branding(self):
         self.assertIn("<title>Triumfator", app.HTML); self.assertIn('href="/favicon.png"', app.HTML)
 
+    def _vrow(self, mode="live", fav_on=6, opp_on=2, fav_gf=2):
+        g = lambda on, tot, gf, ga, cor: {"on": on, "tot": tot, "gf": gf, "ga": ga, "cor": cor}
+        fg = [g(fav_on, 15, fav_gf, 0, 7) for _ in range(5)]; og = [g(opp_on, 8, 0, 2, 3) for _ in range(5)]
+        return {"mode": mode, "side": "D", "games": fg, "opp_games": og,
+                "stats": app.compute_stats(fg), "opp_stats": app.compute_stats(og)}
+    TF = {"pos": 2, "of": 18, "played": 10, "gf": 20, "gpm": 2.0}
+    TO = {"pos": 15, "of": 18, "played": 10, "gf": 8, "gpm": 0.8}
+    def test_vip_all_pass_live(self):
+        c = app.vip_check(self._vrow(), 1.7, {"on": (4, 1), "cor": (3, 3), "da": (40, 20)}, self.TF, self.TO)
+        self.assertTrue(all(x["ok"] for x in c), [x for x in c if not x["ok"]])
+    def test_vip_odds_below_160(self):
+        c = app.vip_check(self._vrow(), 1.55, {"on": (4, 1), "cor": (3, 3), "da": (40, 20)}, self.TF, self.TO)
+        self.assertFalse(c[0]["ok"])
+    def test_vip_live_stats_missing(self):
+        c = app.vip_check(self._vrow(), 1.7, None, self.TF, self.TO)
+        self.assertFalse(all(x["ok"] for x in c))
+    def test_vip_live_rival_dominates(self):
+        c = app.vip_check(self._vrow(), 1.7, {"on": (1, 4), "cor": (3, 3), "da": (40, 20)}, self.TF, self.TO)
+        self.assertFalse(all(x["ok"] for x in c))
+    def test_vip_no_table(self):
+        c = app.vip_check(self._vrow("prematch"), 1.7, None, None, None)
+        self.assertFalse(all(x["ok"] for x in c))
+        self.assertIn("brak danych", [x["fav"] for x in c])
+    def test_vip_prematch_pass_and_bottom_table(self):
+        self.assertTrue(all(x["ok"] for x in app.vip_check(self._vrow("prematch"), 1.7, None, self.TF, self.TO)))
+        bad = dict(self.TF, pos=16)
+        self.assertFalse(all(x["ok"] for x in app.vip_check(self._vrow("prematch"), 1.7, None, bad, self.TO)))
+    def test_vip_four_of_five_rejected(self):
+        r = self._vrow(); r["games"][0]["on"] = None; r["games"][0]["tot"] = None; r["stats"] = app.compute_stats(r["games"])
+        c = app.vip_check(r, 1.7, {"on": (4, 1), "cor": (3, 3), "da": (40, 20)}, self.TF, self.TO)
+        self.assertFalse(c[1]["ok"])
+    def test_vip_html(self):
+        self.assertIn('data-v="vip"', app.HTML); self.assertIn("Najostrzejsze typy – żadna pewność", app.HTML)
+        self.assertNotIn("100% pewniak", app.HTML)
+
 if __name__ == "__main__":
     unittest.main()
