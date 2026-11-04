@@ -208,15 +208,35 @@ def match_info(br):
                 "season": m.get("_seasonid") or (d.get("season") or {}).get("_id")}
     return cached("mi:%s" % br, TEAM_TTL, f)
 
+RECENT_DAYS = 90       # mecz liczy się tylko, gdy nie starszy niż 90 dni (uts) - WSZĘDZIE
+
+def is_recent(uts, now_ts=None, days=RECENT_DAYS):
+    if not uts: return False
+    now_ts = time.time() if now_ts is None else now_ts
+    try: return now_ts - float(uts) <= days * 86400
+    except (TypeError, ValueError): return False
+
+def all_recent(games, now_ts=None, days=RECENT_DAYS):
+    return bool(games) and all(is_recent(g.get("uts"), now_ts, days) for g in games)
+
+class Games(list):
+    """Lista meczów + flaga stale (część z ost. 5 meczów starsza niż 90 dni i odrzucona)."""
+    stale = False
+
+def recent_last5(matches, exclude_id, now_ts=None):
+    """JEDNO miejsce: zakończone mecze (bez exclude_id), od najnowszego, tylko <=90 dni, max 5.
+    Zwraca (mecze, stale) - stale=True gdy w surowych ost. 5 był mecz starszy niż 90 dni."""
+    ms = [x for x in (matches or []) if (x.get("result") or {}).get("home") is not None and str(x.get("_id")) != str(exclude_id)]
+    ms.sort(key=lambda x: (x.get("time") or {}).get("uts") or 0, reverse=True)
+    stale = any(not is_recent((x.get("time") or {}).get("uts"), now_ts) for x in ms[:5])
+    return [x for x in ms if is_recent((x.get("time") or {}).get("uts"), now_ts)][:5], stale
+
 def team_last5(uid, exclude_br):
     def f():
         d = gismo("stats_team_lastx/%s/15" % uid)
         if d is None: return None
         if not isinstance(d, dict): d = {}
-        ms = [x for x in (d.get("matches") or [])
-              if (x.get("result") or {}).get("home") is not None and str(x.get("_id")) != str(exclude_br)]
-        ms.sort(key=lambda x: (x.get("time") or {}).get("uts") or 0, reverse=True)
-        ms = ms[:5]
+        ms, stale = recent_last5(d.get("matches"), exclude_br)
         dets = [match_details(x["_id"]) for x in ms]
         games = []
         for x, dd in zip(ms, dets):
@@ -238,8 +258,9 @@ def team_last5(uid, exclude_br):
                 cor = dd.get("cor")
                 if cor and g["on"] is not None: g["cor"] = cor[i]
             games.append(g)
-        return games
-    return cached("team2:%s:%s" % (uid, exclude_br), TEAM_TTL, f)
+        out = Games(games); out.stale = stale and len(games) < 5
+        return out
+    return cached("team3:%s:%s" % (uid, exclude_br), TEAM_TTL, f)
 
 # ---------- logika (czysta, testowalna) ----------
 def pick_favourite(o1, o2, odds_min, odds_max, gap=0.5):
@@ -266,6 +287,7 @@ def qualifies(r):
     """Obie drużyny 5/5 meczów z danymi; 4 vs 5 tylko gdy przewaga faworyta >= 1,5 celnego/mecz."""
     st, os_ = r.get("stats") or {}, r.get("opp_stats") or {}
     fa, ob = st.get("games_with_data") or 0, os_.get("games_with_data") or 0
+    if r.get("stale"): return False        # mecze starsze niż 90 dni -> za mało danych (nieaktualne)
     if fa >= 5 and ob >= 5: return True
     if sorted((min(fa, 5), min(ob, 5))) == [4, 5]:
         x, y = st.get("avg_on"), os_.get("avg_on")
@@ -322,7 +344,8 @@ def _process_event(ev, odds_min, odds_max):
            "odds_fav": fav, "odds_other": other, "odds_draw": ev.get("ox"),
            "season": mi.get("season"), "uid": mi[side]["uid"], "opp_uid": mi[opp]["uid"],
            "eventId": ev["eventId"], "betradarId": ev["br"], "games": games, "stats": st,
-           "opp_games": og, "opp_stats": ost, "diff": compare(st, ost)}
+           "opp_games": og, "opp_stats": ost, "diff": compare(st, ost),
+           "stale": bool(getattr(games, "stale", False) or getattr(og, "stale", False))}
     return ("nostats" if st["games_with_data"] == 0 else "ok", row)
 
 def compare(a, b):
@@ -941,16 +964,6 @@ LEAGUE_AVG = 1.35      # fallback: typowa średnia goli drużyny na mecz
 GA_CAP = 4             # cap goli straconych w meczu
 TIER_W = 0.5           # waga meczu z rywalem z innej ligi
 TEMP_MIN = 40
-RECENT_DAYS = 90       # mecz liczy się tylko, gdy nie starszy niż 90 dni (uts)
-
-def is_recent(uts, now_ts=None, days=RECENT_DAYS):
-    if not uts: return False
-    now_ts = time.time() if now_ts is None else now_ts
-    try: return now_ts - float(uts) <= days * 86400
-    except (TypeError, ValueError): return False
-
-def all_recent(games, now_ts=None, days=RECENT_DAYS):
-    return bool(games) and all(is_recent(g.get("uts"), now_ts, days) for g in games)
 WORST_RULE = ("Dla każdego z 5 meczów: gole stracone obcinamy do 4 (cap), a potem odejmujemy średnią goli strzelanych przez tego rywala "
               "w jego ost. 5 meczach (bez meczu z tą drużyną): nadwyżka = max(0, min(stracone,4) − śr. rywala). Gdy brak danych o rywalu: "
               "nadwyżka = max(0, min(stracone,4) − 1,35 [średnia ligowa]). Mecz ma wagę ×0,5, gdy główna liga rywala (najczęstsza rozgrywka "
@@ -980,8 +993,7 @@ def opp_attack(uid, exclude_mid, now_ts=None):
     if not uid: return None
     d = lastx_raw(uid)
     if not d: return None
-    ms = [x for x in _done(d) if str(x.get("_id")) != str(exclude_mid) and is_recent((x.get("time") or {}).get("uts"), now_ts)]
-    ms.sort(key=lambda x: (x.get("time") or {}).get("uts") or 0, reverse=True)
+    ms, _ = recent_last5(d.get("matches"), exclude_mid, now_ts)
     gf = []
     for x in ms[:5]:
         ish = (x["teams"]["home"].get("uid") == uid)
@@ -996,8 +1008,7 @@ def team_games(uid, exclude_br):
         d = lastx_raw(uid)
         if d is None: return None
         tours = d.get("tournaments") or {}
-        ms = [x for x in _done(d) if str(x.get("_id")) != str(exclude_br)]
-        ms.sort(key=lambda x: (x.get("time") or {}).get("uts") or 0, reverse=True)
+        ms, stale = recent_last5(d.get("matches"), exclude_br)
         out = []
         for x in ms[:5]:
             ish = (x["teams"]["home"].get("uid") == uid); i = 0 if ish else 1
@@ -1006,16 +1017,52 @@ def team_games(uid, exclude_br):
             g = {"mid": x.get("_id"), "date": (x.get("time") or {}).get("date"), "uts": (x.get("time") or {}).get("uts"),
                  "opp": o.get("name"), "opp_uid": o.get("uid"), "ha": "D" if ish else "W",
                  "comp": (tours.get(str(x.get("_tid"))) or {}).get("name"), "league": x.get("_utid") or x.get("_tid"),
-                 "score": "%s:%s" % (gf, ga), "gf": to_int(gf), "ga": to_int(ga), "on_a": None, "tot_a": None}
+                 "score": "%s:%s" % (gf, ga), "gf": to_int(gf), "ga": to_int(ga), "on_a": None, "tot_a": None, "on_f": None, "tot_f": None}
             dd = match_details(x["_id"])
             if dd:
                 on, tot = dd.get("on"), dd.get("tot")
                 if (g["gf"] or g["ga"]) and on in (None, (0, 0)) and tot in (None, (0, 0)): on = tot = None
-                if on: g["on_a"] = on[1 - i]
-                if tot: g["tot_a"] = tot[1 - i]
+                if on: g["on_a"], g["on_f"] = on[1 - i], on[i]
+                if tot: g["tot_a"], g["tot_f"] = tot[1 - i], tot[i]
             out.append(g)
-        return {"games": out, "league": primary_league(d)}
+        return {"games": out, "league": primary_league(d), "stale": stale}
     return cached("tg:%s:%s" % (uid, exclude_br), TEAM_TTL, f)
+
+def opp_attack_summary(games, now_ts=None):
+    """Atak rywala z jego ost. 5 meczów (tylko <=90 dni). None gdy brak świeżych meczów."""
+    gs = [g for g in (games or []) if g.get("gf") is not None and is_recent(g.get("uts"), now_ts)][:5]
+    if not gs: return None
+    n = len(gs)
+    def av(k):
+        v = [g[k] for g in gs if g.get(k) is not None]
+        return round(sum(v) / len(v), 1) if len(v) == n else None
+    return {"n": n, "gf": sum(g["gf"] for g in gs), "gf_avg": round(sum(g["gf"] for g in gs) / n, 2),
+            "on_avg": av("on_f"), "tot_avg": av("tot_f"), "results": " ".join(g["score"] for g in gs)}
+
+TL_DONE_TTL = 24 * 3600
+TL_MAX_TEAMS = 30      # limit zapytań o timeline na jedno liczenie (darmowy serwer)
+
+def conceded_minutes(tl, ha):
+    """Minuty goli straconych przez drużynę (ha 'D'/'W') z timeline zakończonego meczu. None gdy brak timeline."""
+    if not tl or not isinstance(tl, dict): return None
+    me = "home" if ha == "D" else "away"
+    out = []
+    for e in tl_events(tl):
+        if e.get("type") != "goal": continue
+        tm = e.get("team")
+        if tm not in ("home", "away") or tm == me: continue
+        t = to_int(e.get("time"))
+        if t is None: continue
+        out.append(max(1, t))
+    return sorted(out)
+
+def concede_profile(per_game):
+    """per_game: lista list minut (None = brak timeline). Podsumowanie albo None."""
+    ok = [m for m in per_game if m is not None]
+    if not ok: return None
+    mins = [x for m in ok for x in m]
+    return {"games": len(ok), "missing": len(per_game) - len(ok), "total": len(mins), "minutes": mins,
+            "h1": sum(1 for x in mins if x <= 45), "h2": sum(1 for x in mins if x > 45), "first30": sum(1 for x in mins if x <= 30)}
 
 def adjust_games(games, team_league, opp_info):
     """opp_info: lista (dict|None) per mecz. Zwraca mecze z polami excess/weight/capped/notes."""
@@ -1082,8 +1129,8 @@ def holes_event(ev, opp_cache):
         row = {"team": mi[side]["name"] or ev.get(side), "opponent": mi[opp]["name"] or ev.get(opp), "side": "D" if side == "home" else "W",
                "uid": uid, "tournament": mi.get("tournament") or ev.get("league"), "category": mi.get("category") or ev.get("country"),
                "minutes": ev.get("minutes"), "score": ev.get("score"), "eventId": ev["eventId"], "games_n": len(games), "t": None,
-               "stale": len(games) >= 5 and not all_recent(games[:5])}
-        if len(games) >= 5 and not row["stale"] and all(g["ga"] is not None and g["gf"] is not None for g in games):
+               "stale": bool((tg or {}).get("stale")) and len(games) < 5, "_g": games, "opp_uid": mi[opp]["uid"]}
+        if len(games) >= 5 and all(g["ga"] is not None and g["gf"] is not None for g in games):
             infos = []
             for g in games:
                 k = (g["opp_uid"], g["mid"])
@@ -1119,8 +1166,23 @@ def holes(progress=None):
         for r in rs:
             if (r["uid"], r["eventId"]) in seen: continue
             seen.add((r["uid"], r["eventId"])); rows.append(r)
+    by_ev = {}
+    for r in rows: by_ev.setdefault(r["eventId"], []).append(r)
+    for r in rows:
+        o = [x for x in by_ev[r["eventId"]] if x is not r]
+        r["opp_att"] = opp_attack_summary(o[0]["_g"]) if o else None
     full = [r for r in rows if r.get("t")]
     lst = holes_rank(full)
+    def prof(r):
+        try:
+            pg = [conceded_minutes(cached("tlf:%s" % g["mid"], TL_DONE_TTL, lambda m=g["mid"]: gismo("match_timeline/%s" % m)), g["ha"])
+                  for g in r["games"]]
+            r["concede"] = concede_profile(pg)
+        except Exception as ex:
+            ERRORS["dziurawe_tl"] = "%s: %s" % (type(ex).__name__, ex); r["concede"] = None
+    with ThreadPoolExecutor(4) as ex:
+        list(ex.map(prof, lst[:TL_MAX_TEAMS]))
+    for r in rows: r.pop("_g", None)
     now = datetime.now(timezone.utc)
     return {"generated_warsaw": to_warsaw(now).strftime("%Y-%m-%d %H:%M:%S"), "list": lst,
             "counts": {"teams": len(rows), "listed": len(lst), "too_few": sum(1 for r in rows if not r.get("t") and not r.get("stale")),

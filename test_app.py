@@ -372,8 +372,8 @@ class TestRecency(unittest.TestCase):
             app.live_details = lambda br: None
             now = app.time.time()
             fresh = [dict(self.gm(d), uts=now - d * 86400) for d in (1, 2, 3, 4, 5)]
-            old = fresh[:4] + [dict(self.gm(0), uts=now - 730 * 86400)]
-            app.team_games = lambda uid, br: {"games": fresh if uid == 1 else old, "league": 1}
+            app.team_games = lambda uid, br: ({"games": fresh, "league": 1, "stale": False} if uid == 1
+                                              else {"games": fresh[:4], "league": 1, "stale": True})   # 5. mecz sprzed 2 lat odrzucony
             app.opp_attack = lambda uid, mid, now_ts=None: None
             _, rows = app.holes_event({"br": 5, "eventId": 1}, {})
             h, a = rows
@@ -381,3 +381,39 @@ class TestRecency(unittest.TestCase):
             self.assertTrue(a["stale"]); self.assertIsNone(a["t"])
         finally:
             app.match_info, app.live_details, app.team_games, app.opp_attack = o
+
+class TestOppAndConcede(unittest.TestCase):
+    def test_opp_attack_summary_fresh_only(self):
+        now = app.time.time()
+        g = lambda d, gf, on=None, tot=None: {"uts": now - d * 86400, "gf": gf, "ga": 0, "score": "%d:0" % gf, "on_f": on, "tot_f": tot}
+        s = app.opp_attack_summary([g(1, 2, 5, 10), g(2, 0, 3, 8), g(400, 9, 9, 9)], now)
+        self.assertEqual((s["n"], s["gf"], s["gf_avg"], s["on_avg"], s["tot_avg"]), (2, 2, 1.0, 4.0, 9.0))
+        self.assertIsNone(app.opp_attack_summary([g(200, 1)], now))
+        self.assertIsNone(app.opp_attack_summary([g(1, 1), g(2, 1, 3, 3)], now)["on_avg"])
+    def test_conceded_minutes(self):
+        tl = {"events": [{"type": "goal", "team": "away", "time": 12}, {"type": "goal", "team": "home", "time": 30},
+                         {"type": "goal", "team": "away", "time": 88}, {"type": "corner", "team": "away", "time": 5}]}
+        orig = app.tl_events
+        try:
+            app.tl_events = lambda t: t["events"]
+            self.assertEqual(app.conceded_minutes(tl, "D"), [12, 88])
+            self.assertEqual(app.conceded_minutes(tl, "W"), [30])
+        finally:
+            app.tl_events = orig
+        self.assertIsNone(app.conceded_minutes(None, "D"))
+    def test_concede_profile(self):
+        p = app.concede_profile([[12, 88], [30], None, [], [46]])
+        self.assertEqual((p["total"], p["h1"], p["h2"], p["first30"], p["missing"], p["games"]), (4, 2, 2, 2, 1, 4))
+        self.assertIsNone(app.concede_profile([None, None]))
+
+class TestSharedRecency(unittest.TestCase):
+    def test_recent_last5_drops_old(self):
+        now = app.time.time()
+        m = lambda i, d: {"_id": i, "time": {"uts": now - d * 86400}, "result": {"home": 1, "away": 0}}
+        ms, stale = app.recent_last5([m(1, 1), m(2, 10), m(3, 800), m(4, 900), m(5, 20), m(6, 30), m(7, 1000)], 99)
+        self.assertEqual([x["_id"] for x in ms], [1, 2, 5, 6]); self.assertTrue(stale)
+        ms, stale = app.recent_last5([m(i, i) for i in range(1, 7)], 1)
+        self.assertEqual([x["_id"] for x in ms], [2, 3, 4, 5, 6]); self.assertFalse(stale)
+    def test_qualifies_rejects_stale(self):
+        r = {"stats": {"games_with_data": 5}, "opp_stats": {"games_with_data": 5}}
+        self.assertTrue(app.qualifies(r)); r["stale"] = True; self.assertFalse(app.qualifies(r))
