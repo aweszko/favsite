@@ -1,50 +1,53 @@
 <!doctype html><html lang="pl"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<meta name="theme-color" content="#0a0a0a"><title>Favsite – mecze i faworyci</title>
+<meta name="theme-color" content="#0b0c0f"><title>Triumfator – Porównywarka statystyk piłkarskich</title>
+<link rel="icon" type="image/png" href="/favicon.png"><link rel="icon" href="/favicon.ico" sizes="any"><link rel="apple-touch-icon" href="/apple-touch-icon.png">
 <style>
-:root{--b:#7a0c1f;--b2:#8b1428;--bg:#0a0a0a;--c:#141414;--l:#262626;--t:#ececec;--s:#9a9a9a}
+:root{--g:#d4af37;--g2:#c9a24b;--g3:#f1d98a;--gg:linear-gradient(135deg,#c9a24b,#d4af37 45%,#f1d98a);--sv:#c0c4cc;--b:#7a0c1f;--b2:#9c1830;--bg:#0b0c0f;--c:#14161b;--l:#2a2d35;--t:#eceef2;--s:#a3a8b2}
 *{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--t);font:15px/1.4 system-ui,-apple-system,Segoe UI,Roboto,sans-serif}
-header{position:sticky;top:0;z-index:5;background:#000;border-bottom:2px solid var(--b)}
-.top{display:flex;align-items:center;justify-content:space-between;padding:10px 12px 6px}
-h1{font-size:18px;margin:0}h1 span{color:var(--b2)}
+header{position:sticky;top:0;z-index:5;background:linear-gradient(180deg,#14161b,#0b0c0f);border-bottom:1px solid #5c4a1a;box-shadow:0 1px 0 var(--b)}
+.top{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:8px 12px 6px}.brand{display:flex;align-items:center;gap:10px;min-width:0}.brand img{height:48px;width:auto;display:block}.brand .tx{min-width:0}
+h1{font-size:20px;margin:0;letter-spacing:.06em;text-transform:uppercase;background:var(--gg);-webkit-background-clip:text;background-clip:text;color:transparent}.sub{font-size:11px;color:var(--sv);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .main{display:flex;gap:6px;padding:0 12px 8px}
 .main button{flex:1;padding:10px;border-radius:10px;border:1px solid var(--l);background:var(--c);color:var(--t);font-weight:600;font-size:15px}
-.main button.on{background:var(--b);border-color:var(--b2)}
+.main button.on{background:var(--gg);border-color:var(--g);color:#14161b}
 .tabs{display:flex;gap:6px;overflow-x:auto;padding:0 12px 10px;scrollbar-width:none}.tabs::-webkit-scrollbar{display:none}
 .tabs button{flex:0 0 auto;padding:8px 13px;border-radius:18px;border:1px solid var(--l);background:var(--c);color:var(--t);font-size:14px;white-space:nowrap}
-.tabs button.on{background:var(--b2);border-color:var(--b2)}.tabs .cnt{color:#d9a0aa;font-size:12px;margin-left:4px}
-.tabs button.on .cnt{color:#fff}
+.tabs button.on{background:#1d1a12;border-color:var(--g);color:var(--g3);box-shadow:inset 0 -2px 0 var(--b2)}.tabs .cnt{color:var(--sv);font-size:12px;margin-left:4px}
+.tabs button.on .cnt{color:var(--g)}
 #st{font-size:12px;color:var(--s);padding:6px 12px}.err{color:#ff9a6a}
 input{background:var(--c);color:var(--t);border:1px solid var(--l);border-radius:8px;padding:8px;font-size:15px;width:100%}
 .lg{margin:8px 8px 0;background:var(--c);border-radius:12px;overflow:hidden;border:1px solid var(--l)}
-.lh{background:linear-gradient(90deg,var(--b),#1a1a1a);padding:8px 12px;font-weight:600;font-size:14px;display:flex;justify-content:space-between}
-.lh small{color:#e7c3c9;font-weight:400}
+.lh{background:linear-gradient(90deg,#2a2412,#14161b);border-left:3px solid var(--g);color:var(--g3);padding:8px 12px;font-weight:600;font-size:14px;display:flex;justify-content:space-between}
+.lh small{color:var(--sv);font-weight:400}
 .m{display:grid;grid-template-columns:54px 1fr;gap:4px 8px;padding:9px 12px;border-top:1px solid var(--l)}
-.m:first-of-type{border-top:0}.tm{color:var(--s);font-size:13px;padding-top:2px}.tm .live{color:#ff4d6a;font-weight:700}
-.tn div{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.sc{float:right;color:#ff4d6a;font-weight:700}
+.m:first-of-type{border-top:0}.tm{color:var(--s);font-size:13px;padding-top:2px}.tm .live{color:#ff5c75;font-weight:700}
+.tn div{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.sc{float:right;color:var(--g3);font-weight:700}
 .od{grid-column:2;display:grid;grid-template-columns:repeat(3,1fr);gap:6px}
-.od span{background:#1d1d1d;border:1px solid #333;border-radius:8px;text-align:center;padding:5px 0;font-weight:600}
+.od span{background:#1b1e24;border:1px solid #30343d;border-radius:8px;text-align:center;padding:5px 0;font-weight:600}
 .od span i{font-style:normal;color:var(--s);font-weight:400;font-size:12px;margin-right:6px}
-.od span.min{border-color:var(--b2);background:#2a0a12}
+.od span.min{border-color:var(--g);background:#262010;color:var(--g3)}
 .f{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;padding:0 12px 10px}.f label{font-size:12px;color:var(--s)}
 .card{margin:10px 8px;background:var(--c);border:1px solid var(--l);border-radius:14px;overflow:hidden}
-.ch{padding:9px 12px;background:#000;border-bottom:1px solid var(--b);font-size:13px;color:var(--s);display:flex;justify-content:space-between;gap:8px}
-.ch b{color:#fff}.rk{background:var(--b);color:#fff;border-radius:8px;padding:1px 8px;font-weight:700}
+.ch{padding:9px 12px;background:#0b0c0f;border-bottom:1px solid #5c4a1a;font-size:13px;color:var(--s);display:flex;justify-content:space-between;gap:8px}
+.ch b{color:#fff}.rk{background:var(--gg);color:#14161b;border-radius:8px;padding:1px 8px;font-weight:700}
 .vs{display:grid;grid-template-columns:1fr 64px 1fr;align-items:stretch}
-.vs .c{padding:8px 10px}.vs .fav{background:#1f070c}.vs .mid{background:#0d0d0d;color:var(--s);font-size:11px;text-align:center;display:flex;flex-direction:column;justify-content:space-around;padding:6px 2px}
-.nm{font-weight:700;font-size:15px;min-height:38px}.tag{font-size:11px;color:#e7a0ad}.vs .riv .tag{color:var(--s)}
+.vs .c{padding:8px 10px}.vs .fav{background:#1c1a12}.vs .mid{background:#0f1115;color:var(--s);font-size:11px;text-align:center;display:flex;flex-direction:column;justify-content:space-around;padding:6px 2px}
+.nm{font-weight:700;font-size:15px;min-height:38px}.tag{font-size:11px;color:var(--g)}.vs .riv .tag{color:var(--s)}
 .vs .riv{text-align:right}
-.v{font-size:17px;font-weight:700;padding:3px 0}.nd{color:#777;font-weight:400;font-size:13px}
+.v{font-size:17px;font-weight:700;padding:3px 0}.nd{color:#8a8f99;font-weight:400;font-size:13px}
 .d{font-size:12px;font-weight:600}.pos{color:#5fd38a}.neg{color:#ff6b6b}
 .g{font-size:12px;color:#ccc;border-top:1px solid var(--l)}.g table{width:100%;border-collapse:collapse}
-.g td{padding:3px 6px;border-bottom:1px solid #1c1c1c;white-space:nowrap}.g td.r{text-align:right}
-.tg{display:block;width:100%;background:#111;color:#e7a0ad;border:0;border-top:1px solid var(--l);padding:9px;font-size:13px}
+.g td{padding:3px 6px;border-bottom:1px solid #20232a;white-space:nowrap}.g td.r{text-align:right}
+.tg{display:block;width:100%;background:#101216;color:var(--g3);border:0;border-top:1px solid var(--l);padding:9px;font-size:13px}
 .two{display:grid;grid-template-columns:1fr 1fr}.two>div{overflow:hidden}.two>div+div{border-left:1px solid var(--l)}
-.two h4{margin:0;padding:5px 6px;font-size:12px;color:#fff;background:#1a1a1a}
+.two h4{margin:0;padding:5px 6px;font-size:12px;color:var(--sv);background:#1b1e24}
 .empty{padding:30px 16px;text-align:center;color:var(--s)}footer{padding:14px 12px 30px;color:var(--s);font-size:12px}
-@media(min-width:900px){#list,#rank{max-width:900px;margin:0 auto}.main,.tabs,.f{max-width:900px;margin-left:auto;margin-right:auto}}
+input:focus,button:focus-visible{outline:2px solid var(--g);outline-offset:1px}.top,#st,footer{max-width:900px;margin-left:auto;margin-right:auto}
+@media(max-width:480px){.brand img{height:40px}h1{font-size:17px}}
+@media(min-width:900px){.brand img{height:60px}#list,#rank{max-width:900px;margin:0 auto}.main,.tabs,.f{max-width:900px;margin-left:auto;margin-right:auto}}
 </style></head><body>
-<header><div class="top"><h1>⚽ Fav<span>site</span></h1><span id="clk" class="tm"></span></div>
+<header><div class="top"><div class="brand"><img src="/icon.png" alt="Triumfator – herb" width="48" height="48"><div class="tx"><h1>Triumfator</h1><div class="sub">Porównywarka statystyk piłkarskich</div></div></div><span id="clk" class="tm"></span></div>
 <div class="main"><button data-v="list" class="on">Mecze</button><button data-v="rank">Faworyci – ranking</button></div>
 <div class="tabs" id="tabs"></div></header>
 <div id="st">Ładowanie…</div>
@@ -81,7 +84,7 @@ function games(gs){if(gs==null)return'<div class="empty" style="padding:8px">bra
 return '<table>'+gs.map(g=>`<tr><td>${esc((g.date||'').slice(0,5))} ${g.ha}</td><td style="max-width:70px;overflow:hidden;text-overflow:ellipsis">${esc(g.opp)}</td><td>${esc(g.score)}</td><td class="r">${g.on==null&&g.tot==null?'<span class="nd">b.d.</span>':(g.on??'–')+'/'+(g.tot??'–')}</td></tr>`).join('')+'</table>'}
 function card(r,few){const a=r.stats,b=r.opp_stats,d=r.diff||{},id=r.eventId,ga=a.games_with_data+'/'+a.games_total,gb=b?b.games_with_data+'/'+b.games_total:'–';
 const line=(lab,x,y,dd,dg=2,suf='')=>`<div class="c fav"><div class="v">${stat(x,dg,suf)}</div></div><div class="mid">${lab}<br>${dd}</div><div class="c riv"><div class="v">${stat(y,dg,suf)}</div></div>`;
-const when=r.mode=='live'?`<span style="color:#ff4d6a">● ${r.minutes!=null?esc(r.minutes)+"'":'LIVE'} ${esc(r.score||'')}</span>`:esc(r.start_warsaw);
+const when=r.mode=='live'?`<span style="color:#ff5c75">● ${r.minutes!=null?esc(r.minutes)+"'":'LIVE'} ${esc(r.score||'')}</span>`:esc(r.start_warsaw);
 return `<div class="card"><div class="ch"><span>${few?'':`<span class="rk">#${r.rank}</span> `}${esc([r.category,r.tournament].filter(Boolean).join(' · '))}</span><b>${when}</b></div>
 <div class="vs"><div class="c fav"><div class="tag">FAWORYT (${r.side=='D'?'gospodarz':'gość'})</div><div class="nm">${esc(r.team)}</div></div><div class="mid">vs</div><div class="c riv"><div class="tag">RYWAL</div><div class="nm">${esc(r.opponent)}</div></div>
 ${line('kurs',r.odds_fav,r.odds_other,'X '+f(r.odds_draw))}
@@ -96,7 +99,7 @@ ${open[id]?`<div class="g two"><div><h4>${esc(r.team)}</h4>${games(r.games)}</di
 function srErr(d){const e=d.errors||{};return Object.keys(e).some(k=>/sportradar/i.test(k))?'<div class="empty err">Brak danych ze źródła statystyk (Sportradar): '+esc(e.Sportradar||'')+'</div>':''}
 function drawRank(){if(!R)return;if(R.status=='computing'){const p=R.progress||{};$('#rk').innerHTML='<div class="empty">Liczę ranking… ('+(p.done||0)+'/'+(p.total||'?')+')</div>'+srErr(R);$('#st').textContent='Liczę ranking… ('+(p.done||0)+'/'+(p.total||'?')+')';return}if(R.error){$('#rk').innerHTML='<div class="empty err">Błąd: '+esc(R.error)+'</div>';return}
 $('#rk').innerHTML=srErr(R)+(R.ranking.length?R.ranking.map(r=>card(r)).join(''):'<div class="empty">Brak faworytów spełniających kryteria.</div>')+
-(R.too_few.length?'<h3 style="margin:16px 12px 0;font-size:14px;color:#e7a0ad">Za mało danych ('+R.too_few.length+')</h3>'+R.too_few.map(r=>card(r,1)).join(''):'')+
+(R.too_few.length?'<h3 style="margin:16px 12px 0;font-size:14px;color:var(--g)">Za mało danych ('+R.too_few.length+')</h3>'+R.too_few.map(r=>card(r,1)).join(''):'')+
 `<div class="empty" style="padding:10px">Meczów: ${R.footer.matches} · faworytów bez statystyk: ${R.footer.without_stats} · bez betradarId: ${R.footer.without_betradar}</div>`;status(R)}
 function status(d){const e=Object.entries(d.errors||{});$('#st').innerHTML=`Aktualizacja: ${d.generated_warsaw} (Warszawa)`+(e.length?`<div class="err">Błąd źródła (pokazuję ostatni cache): ${esc(e.map(x=>x.join(': ')).join('; '))}</div>`:'')}
 async function loadList(){try{const t=performance.now();M=await (await fetch('/api/matches')).json();if(M.error)throw M.error;drawTabs();drawList();status(M);$('#st').innerHTML+=` · ${M.matches.length} meczów · ${Math.round(performance.now()-t)} ms`}catch(e){$('#st').innerHTML='<span class="err">Błąd ładowania: '+esc(e)+'</span>'}}

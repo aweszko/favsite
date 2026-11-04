@@ -402,6 +402,19 @@ def status():
 # ---------- serwer ----------
 HTML = open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "index.html"), encoding="utf-8").read()
 
+STATIC_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
+STATIC = {"/logo.png": ("logo.png", "image/png"), "/icon.png": ("icon.png", "image/png"),
+          "/favicon.png": ("favicon.png", "image/png"), "/apple-touch-icon.png": ("apple-touch-icon.png", "image/png"),
+          "/favicon.ico": ("favicon.ico", "image/x-icon")}
+
+def static_file(path):
+    """Zwraca (bytes, content_type) dla plików graficznych lub None."""
+    if path not in STATIC: return None
+    name, ctype = STATIC[path]
+    try:
+        with open(os.path.join(STATIC_DIR, name), "rb") as fh: return fh.read(), ctype
+    except OSError: return None
+
 class H(BaseHTTPRequestHandler):
     def log_message(self, *a): pass
     def send(self, code, body, ctype):
@@ -413,6 +426,11 @@ class H(BaseHTTPRequestHandler):
         u = urllib.parse.urlparse(self.path)
         if u.path in ("/", "/index.html"):
             return self.send(200, HTML, "text/html; charset=utf-8")
+        st = static_file(u.path)
+        if st:
+            self.send_response(200); self.send_header("Content-Type", st[1])
+            self.send_header("Content-Length", str(len(st[0]))); self.send_header("Cache-Control", "public, max-age=604800")
+            self.end_headers(); return self.wfile.write(st[0])
         if u.path == "/api/matches":
             try: return self.send(200, json.dumps(matches(), ensure_ascii=False), "application/json; charset=utf-8")
             except Exception as e: return self.send(500, json.dumps({"error": str(e)}), "application/json")

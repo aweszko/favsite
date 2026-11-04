@@ -1,6 +1,8 @@
-# Favsite – mecze piłkarskie i ranking faworytów
+# Triumfator – Porównywarka statystyk piłkarskich
 
-Czarno‑bordowa strona (mobile‑first) z dwiema sekcjami:
+![Triumfator](static/logo.png)
+
+Strona w motywie grafitowo‑złotym (srebrne dodatki, bordo jako akcent; mobile‑first) z dwiema sekcjami:
 
 1. **Mecze** – zakładki jak w Superbet/STS: *Live*, *Za 1 godz.*, *Za 3 godz.*, *Dziś*, *Jutro* i kolejne dni (łącznie 7 dni).
    Wszystkie ligi piłkarskie z oferty Superbet PL, pogrupowane wg rozgrywek, z godziną (Europe/Warsaw), drużynami i kursami 1X2.
@@ -23,6 +25,11 @@ Pliki gotowe: `render.yaml`, `Procfile`, `requirements.txt` (pusty), `.gitignore
 Aplikacja czyta zmienną `PORT`, nasłuchuje na `0.0.0.0`, health check: `/healthz`. Brak sekretów i kluczy.
 Wystarczy wrzucić folder do repozytorium i utworzyć Web Service z `render.yaml`.
 Uwaga: darmowy plan usypia serwis – pierwsze wejście po przerwie i pierwsze wyliczenie rankingu trwa dłużej.
+
+## Grafika
+Logo wycięte z dostarczonego pliku rastrowego (przezroczyste tło, bez przeróbek generatywnych): `static/logo.png` (600 px, z napisem),
+`static/icon.png` (192×192, sam herb), `static/apple-touch-icon.png`, `static/favicon.png`, `static/favicon.ico`.
+Serwowane pod `/logo.png`, `/icon.png`, `/favicon.png`, `/apple-touch-icon.png`, `/favicon.ico` (cache 7 dni).
 
 ## API
 - `/api/matches` – mecze live + 7 dni (cache 55 s)

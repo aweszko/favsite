@@ -78,6 +78,15 @@ class T3(unittest.TestCase):
             self.assertIn("counters", app.status())
         finally:
             app.ranking = orig; app.RESULTS.clear()
+    def test_static_logo(self):
+        for path in ("/logo.png", "/icon.png", "/favicon.png", "/apple-touch-icon.png"):
+            data, ctype = app.static_file(path)
+            self.assertEqual(ctype, "image/png"); self.assertTrue(data.startswith(b"\x89PNG"))
+        self.assertEqual(app.static_file("/favicon.ico")[1], "image/x-icon")
+        self.assertIsNone(app.static_file("/app.py"))
+
+    def test_html_branding(self):
+        self.assertIn("<title>Triumfator", app.HTML); self.assertIn('href="/favicon.png"', app.HTML)
 
 if __name__ == "__main__":
     unittest.main()
