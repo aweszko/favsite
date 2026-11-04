@@ -656,7 +656,80 @@ def streaks(results):
         cur += 1
     return {"current": cur, "current_kind": kind, "longest_hit": best}
 
+GIST_API = "https://api.github.com/gists/"
+GIST_FILE = "pro_log.json"
+GIST_MIN_INTERVAL = 30
+GIST_STATE = {"last": 0.0, "dirty": False, "timer": None, "ok": None, "err": None}
+GIST_SLOCK = threading.Lock()
+
+def gist_cfg():
+    t, g = os.environ.get("GIST_TOKEN", "").strip(), os.environ.get("GIST_ID", "").strip()
+    return (t, g) if t and g else None
+
+def persist_active():
+    return gist_cfg() is not None
+
+def _gist_http(method, gid, token, body=None, timeout=15):
+    """Warstwa HTTP (podmieniana w testach). Zwraca (status, dict)."""
+    data = json.dumps(body).encode("utf-8") if body is not None else None
+    rq = urllib.request.Request(GIST_API + gid, data=data, method=method,
+                                headers={"Authorization": "Bearer " + token, "Accept": "application/vnd.github+json",
+                                         "Content-Type": "application/json", "User-Agent": "triumfator"})
+    with urllib.request.urlopen(rq, timeout=timeout) as r:
+        return r.status, json.loads(r.read().decode("utf-8") or "{}")
+
+def _gist_err(e):
+    # nigdy nie zapisujemy tokenu - tylko typ błędu / kod HTTP
+    msg = type(e).__name__ + (" %s" % e.code if hasattr(e, "code") else "")
+    GIST_STATE["ok"], GIST_STATE["err"] = False, msg
+    ERRORS["gist"] = msg
+    print("[gist] błąd: " + msg, file=sys.stderr)
+
+def gist_load():
+    cfg = gist_cfg()
+    if not cfg: return None
+    try:
+        st, d = _gist_http("GET", cfg[1], cfg[0])
+        f = (d.get("files") or {}).get(GIST_FILE) or {}
+        content = f.get("content")
+        if f.get("truncated") and f.get("raw_url"):
+            rq = urllib.request.Request(f["raw_url"], headers={"Authorization": "Bearer " + cfg[0], "User-Agent": "triumfator"})
+            with urllib.request.urlopen(rq, timeout=15) as r: content = r.read().decode("utf-8")
+        log = json.loads(content or "[]")
+        if not isinstance(log, list): raise ValueError("bad log")
+        GIST_STATE["ok"] = True
+        return log
+    except Exception as e:
+        _gist_err(e); return None
+
+def gist_push_now():
+    cfg = gist_cfg()
+    if not cfg: return False
+    with GIST_SLOCK:
+        GIST_STATE["dirty"] = False; GIST_STATE["last"] = time.time(); GIST_STATE["timer"] = None
+    try:
+        with PRO_LOCK: content = json.dumps(PRO_LOG, ensure_ascii=False)
+        _gist_http("PATCH", cfg[1], cfg[0], {"files": {GIST_FILE: {"content": content}}})
+        GIST_STATE["ok"], GIST_STATE["err"] = True, None
+        ERRORS.pop("gist", None)
+        return True
+    except Exception as e:
+        _gist_err(e); return False
+
+def gist_schedule():
+    """Zapis do gista: co najwyżej raz na ~30 s, zmiany łączone."""
+    if not gist_cfg(): return
+    with GIST_SLOCK:
+        GIST_STATE["dirty"] = True
+        if GIST_STATE["timer"] is not None: return
+        delay = max(0.0, GIST_STATE["last"] + GIST_MIN_INTERVAL - time.time())
+        t = threading.Timer(delay, gist_push_now); t.daemon = True
+        GIST_STATE["timer"] = t
+    t.start()
+
 def pro_load():
+    g = gist_load()
+    if g is not None: return g
     try:
         with open(PRO_LOG_PATH, encoding="utf-8") as fh: return json.load(fh)
     except Exception: return []
@@ -667,6 +740,8 @@ def pro_save(log):
         with open(tmp, "w", encoding="utf-8") as fh: json.dump(log, fh, ensure_ascii=False)
         os.replace(tmp, PRO_LOG_PATH)
     except Exception as e: ERRORS["rejestr"] = "%s: %s" % (type(e).__name__, e)
+    try: gist_schedule()
+    except Exception as e: _gist_err(e)
 
 PRO_LOG = pro_load()
 
@@ -740,7 +815,8 @@ def pro(vip_res):
             "watch": watch, "watch_live": sum(1 for w in watch if w.get("live")), "types": types, "near": sorted(near, key=lambda x: x["missing"]),
             "message": None if types else "Brak typów w tej chwili",
             "record": record_stats(log), "log": list(reversed(log))[:40],
-            "notes": ["Typy to spełnione kryteria, nie gwarancja.", "Rejestr zeruje się po restarcie serwera."]}
+            "notes": ["Typy to spełnione kryteria, nie gwarancja.", ("Rejestr jest zapisywany w prywatnym gistcie." if persist_active() else "Rejestr zeruje się po restarcie serwera.")],
+            "persistent": persist_active()}
 
 PRO_STATE = {"res": None, "t": 0, "job": False}
 PRO_TTL = 45
@@ -813,7 +889,8 @@ def status():
                 "jobs": [{"key": list(k), "progress": dict(j["progress"]), "elapsed_seconds": round(time.time() - j["started"])} for k, j in JOBS.items()],
                 "results": [{"key": list(k), "age_seconds": round(time.time() - v[0]), "compute_seconds": v[1].get("compute_seconds"),
                              "ranking": len(v[1]["ranking"]), "too_few": len(v[1]["too_few"]), "footer": v[1]["footer"]} for k, v in RESULTS.items()],
-                "cache_entries": len(CACHE), "threads": threading.active_count()}
+                "cache_entries": len(CACHE), "threads": threading.active_count(),
+                "persistence": {"active": persist_active(), "ok": GIST_STATE["ok"], "error": GIST_STATE["err"]}}
 
 # ---------- serwer ----------
 HTML = open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "index.html"), encoding="utf-8").read()

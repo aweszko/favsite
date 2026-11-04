@@ -194,5 +194,61 @@ class TPro(unittest.TestCase):
         self.assertIn('data-v="pro"', app.HTML); self.assertIn("nie gwarancja", app.HTML)
         self.assertIn("Rejestr zeruje się po restarcie serwera", app.HTML); self.assertIn("Lista obserwowanych", app.HTML)
 
+class TGist(unittest.TestCase):
+    def setUp(self):
+        import os, tempfile
+        self.env = {k: os.environ.get(k) for k in ("GIST_TOKEN", "GIST_ID")}
+        self.http = app._gist_http; self.path = app.PRO_LOG_PATH
+        self.tmp = tempfile.mkdtemp(); app.PRO_LOG_PATH = os.path.join(self.tmp, "l.json")
+        self.calls = []
+        app.GIST_STATE.update({"last": 0.0, "dirty": False, "timer": None, "ok": None, "err": None})
+    def tearDown(self):
+        import os
+        for k, v in self.env.items():
+            if v is None: os.environ.pop(k, None)
+            else: os.environ[k] = v
+        app._gist_http = self.http; app.PRO_LOG_PATH = self.path
+        t = app.GIST_STATE.get("timer")
+        if t: t.cancel()
+        app.GIST_STATE["timer"] = None
+    def on(self):
+        import os; os.environ["GIST_TOKEN"] = "x-test"; os.environ["GIST_ID"] = "gid"
+    def off(self):
+        import os; os.environ.pop("GIST_TOKEN", None); os.environ.pop("GIST_ID", None)
+    def fake(self, resp=None, exc=None):
+        def f(method, gid, token, body=None, timeout=15):
+            self.calls.append((method, gid, body))
+            if exc: raise exc
+            return 200, resp or {}
+        app._gist_http = f
+    def test_load_from_gist(self):
+        self.on(); self.fake({"files": {"pro_log.json": {"content": '[{"eventId": 1}]'}}})
+        self.assertEqual(app.pro_load(), [{"eventId": 1}]); self.assertTrue(app.persist_active())
+        self.assertEqual(self.calls[0][:2], ("GET", "gid"))
+    def test_load_fallback_file(self):
+        import json
+        json.dump([{"eventId": 2}], open(app.PRO_LOG_PATH, "w"))
+        self.on(); self.fake(exc=OSError("net"))
+        self.assertEqual(app.pro_load(), [{"eventId": 2}]); self.assertFalse(app.GIST_STATE["ok"])
+        self.assertNotIn("x-test", json.dumps(app.status()))
+    def test_no_env_file_only(self):
+        self.off(); self.fake()
+        self.assertFalse(app.persist_active()); self.assertEqual(app.pro_load(), [])
+        app.pro_save([{"eventId": 3}]); self.assertEqual(self.calls, []); self.assertIsNone(app.GIST_STATE["timer"])
+    def test_push_and_coalesce(self):
+        import json
+        self.on(); self.fake()
+        app.GIST_STATE["last"] = __import__("time").time()   # świeżo zapisane -> odroczenie
+        app.pro_save([]); t1 = app.GIST_STATE["timer"]; app.pro_save([]); 
+        self.assertIs(app.GIST_STATE["timer"], t1); self.assertEqual(self.calls, [])
+        t1.cancel(); app.gist_push_now()
+        m, g, body = self.calls[0]
+        self.assertEqual((m, g), ("PATCH", "gid")); json.loads(body["files"]["pro_log.json"]["content"])
+        self.assertFalse(app.GIST_STATE["dirty"]); self.assertTrue(app.GIST_STATE["ok"])
+    def test_push_failure_safe(self):
+        self.on(); self.fake(exc=RuntimeError("boom"))
+        self.assertFalse(app.gist_push_now()); self.assertIn("gist", app.ERRORS)
+        self.assertNotIn("x-test", str(app.ERRORS))
+
 if __name__ == "__main__":
     unittest.main()
