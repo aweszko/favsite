@@ -258,10 +258,23 @@ def compute_stats(games):
             "sum_tot": s_tot, "avg_tot": round(s_tot / len(tot), 2) if tot else None,
             "accuracy": round(100.0 * b_on / b_tot, 1) if b_tot else None}
 
-def build_ranking(rows, min_games, sort_key="sum_on"):
-    ok = [r for r in rows if r["stats"]["games_with_data"] >= min_games]
-    few = [r for r in rows if r["stats"]["games_with_data"] < min_games]
-    ok.sort(key=lambda r: (r["stats"].get(sort_key) or 0), reverse=True)
+def qualifies(r):
+    """Obie drużyny 5/5 meczów z danymi; 4 vs 5 tylko gdy przewaga faworyta >= 1,5 celnego/mecz."""
+    st, os_ = r.get("stats") or {}, r.get("opp_stats") or {}
+    fa, ob = st.get("games_with_data") or 0, os_.get("games_with_data") or 0
+    if fa >= 5 and ob >= 5: return True
+    if sorted((min(fa, 5), min(ob, 5))) == [4, 5]:
+        x, y = st.get("avg_on"), os_.get("avg_on")
+        return x is not None and y is not None and x - y >= 1.5
+    return False
+
+def build_ranking(rows, min_games=None, sort_key="avg_on"):
+    ok = [r for r in rows if qualifies(r)]
+    few = [r for r in rows if not qualifies(r)]
+    def k(r):
+        x, y = r["stats"].get("avg_on") or 0, ((r.get("opp_stats") or {}).get("avg_on") or 0)
+        return (x - y, x)                     # głównie różnica średnich celnych na mecz
+    ok.sort(key=k, reverse=True)
     for i, r in enumerate(ok, 1): r["rank"] = i
     return ok, few
 

@@ -21,12 +21,16 @@ class T(unittest.TestCase):
         self.assertIsNone(app.pick_favourite(1.9, 2.3, 1.2, 2.0))   # różnica < 0,50
         self.assertIsNone(app.pick_favourite(1.1, 9.0, 1.2, 2.0))   # poza zakresem
         self.assertIsNotNone(app.pick_favourite(1.5, 2.0, 1.2, 2.0))  # dokładnie 0,50
-    def test_ranking_sort_and_too_few(self):
-        rows = [{"team": "A", "stats": app.compute_stats(SAMPLE_GAMES)},
-                {"team": "B", "stats": app.compute_stats([{"on": 9, "tot": 20}] * 5)},
-                {"team": "C", "stats": app.compute_stats([{"on": 9, "tot": 9}] * 2 + [{"on": None, "tot": None}] * 3)}]
+    def test_ranking_sort_and_too_few(self):  # PRZYKŁADOWE
+        S = lambda on, n, nd=0: app.compute_stats([{"on": on, "tot": on + 5}] * n + [{"on": None, "tot": None}] * nd)
+        rows = [{"team": "A", "stats": S(5, 5), "opp_stats": S(4, 5)},          # 5v5, +1
+                {"team": "B", "stats": S(7, 5), "opp_stats": S(3, 5)},          # 5v5, +4
+                {"team": "C", "stats": S(6, 4, 1), "opp_stats": S(4, 5)},       # 4v5, +2 -> ok
+                {"team": "D", "stats": S(5, 4, 1), "opp_stats": S(4, 5)},       # 4v5, +1 -> za mało
+                {"team": "E", "stats": S(9, 5), "opp_stats": S(1, 3, 2)},       # 3 mecze -> za mało
+                {"team": "F", "stats": S(9, 5), "opp_stats": None}]
         ok, few = app.build_ranking(rows, 3)
-        self.assertEqual([r["team"] for r in ok], ["B", "A"]); self.assertEqual([r["team"] for r in few], ["C"])
+        self.assertEqual([r["team"] for r in ok], ["B", "C", "A"]); self.assertEqual([r["team"] for r in few], ["D", "E", "F"])
     def test_warsaw_time(self):
         self.assertEqual(app.to_warsaw(datetime(2026, 11, 4, 12, 0, tzinfo=timezone.utc)).hour, 13)
         self.assertEqual(app.to_warsaw(datetime(2026, 7, 1, 12, 0, tzinfo=timezone.utc)).hour, 14)
