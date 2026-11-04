@@ -274,3 +274,31 @@ class TGist(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestWorst(unittest.TestCase):
+    def g(self, gf, ga, on=3, tot=10, on_a=4, tot_a=12):
+        return {"gf": gf, "ga": ga, "score": "%d:%d" % (gf, ga), "on": on, "tot": tot, "on_a": on_a, "tot_a": tot_a}
+    def row(self, name, games, mode="prematch"):
+        return {"team": name, "mode": mode, "ws": app.weak_stats(games)}
+    def test_weak_stats(self):
+        ws = app.weak_stats([self.g(0, 4), self.g(0, 5), self.g(1, 0), self.g(0, 2), self.g(2, 2)])
+        self.assertEqual((ws["gf"], ws["ga"], ws["clean"], ws["blank"]), (3, 13, 1, 3))
+        self.assertEqual(ws["results"], "0:4 0:5 1:0 0:2 2:2")
+        self.assertEqual(ws["on_a_avg"], 4.0)
+    def test_missing_shots_is_none(self):
+        gs = [self.g(1, 1) for _ in range(5)]; gs[2]["on_a"] = None
+        self.assertIsNone(app.weak_stats(gs)["on_a_avg"])
+    def test_sorting_and_too_few(self):
+        rows = [self.row("A", [self.g(0, 3)] * 5), self.row("B", [self.g(2, 1)] * 5),
+                self.row("C", [self.g(1, 0)] * 5), self.row("D", [self.g(0, 9)] * 4)]
+        w = app.build_worst(rows)
+        self.assertEqual([r["team"] for r in w["conceding"]], ["A", "B", "C"])
+        self.assertEqual([r["team"] for r in w["scoring"]], ["A", "C", "B"])
+        self.assertEqual(w["too_few"], 1)
+        self.assertEqual([r["team"] for r in w["double"]], ["A"])
+    def test_live_filter(self):
+        rows = [self.row("A", [self.g(0, 3)] * 5, "live"), self.row("B", [self.g(0, 5)] * 5)]
+        w = app.build_worst(rows, "live")
+        self.assertEqual([r["team"] for r in w["conceding"]], ["A"])
+        self.assertEqual(len(app.build_worst(rows, "all")["conceding"]), 2)

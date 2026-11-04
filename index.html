@@ -10,6 +10,7 @@ header{position:sticky;top:0;z-index:5;background:linear-gradient(180deg,#14161b
 h1{font-size:20px;margin:0;letter-spacing:.06em;text-transform:uppercase;background:var(--gg);-webkit-background-clip:text;background-clip:text;color:transparent}.sub{font-size:11px;color:var(--sv);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .main{display:flex;gap:6px;padding:0 12px 8px}
 .main button{flex:1;padding:10px;border-radius:10px;border:1px solid var(--l);background:var(--c);color:var(--t);font-weight:600;font-size:15px}
+.main{overflow-x:auto;scrollbar-width:none}.main::-webkit-scrollbar{display:none}.main button{flex:1 0 auto;white-space:nowrap;padding:10px 12px}
 .main button.on{background:var(--gg);border-color:var(--g);color:#14161b}
 .tabs{display:flex;gap:6px;overflow-x:auto;padding:0 12px 10px;scrollbar-width:none}.tabs::-webkit-scrollbar{display:none}
 .tabs button{flex:0 0 auto;padding:8px 13px;border-radius:18px;border:1px solid var(--l);background:var(--c);color:var(--t);font-size:14px;white-space:nowrap}
@@ -55,9 +56,13 @@ input:focus,button:focus-visible{outline:2px solid var(--g);outline-offset:1px}.
 .mk{display:inline-block;margin:6px 4px 0 0;padding:4px 10px;border-radius:12px;background:#c9a227;color:#000;font-weight:700;font-size:13px}
 .rs{display:grid;grid-template-columns:repeat(3,1fr);gap:6px;padding:8px}.rs div{background:#12100a;border:1px solid #4a3c12;border-radius:10px;padding:8px;text-align:center;color:#f3d77a}.rs b{display:block;font-size:18px}.rs small{color:#a99c74;font-size:11px}
 .wl{padding:8px 12px;border-top:1px solid #2a2310;font-size:13px;color:#ddd}.wl small{color:#a99c74}
+.wr{padding:8px 12px;border-top:1px solid #2a2310;font-size:13px}.wr:first-child{border-top:0}.wr b{color:var(--g3)}.wr small{color:var(--s)}
+.wv{display:flex;flex-wrap:wrap;gap:4px 10px;margin-top:4px;font-size:12px;color:#ddd}.wv span b{color:#fff}.wres{font-family:ui-monospace,monospace;font-size:12px;color:var(--sv);margin-top:2px}
+.wn{display:inline-block;min-width:22px;text-align:center;border-radius:6px;background:var(--b);color:var(--g3);font-weight:700;font-size:12px;margin-right:6px}
+@media(min-width:900px){#worst{max-width:900px;margin:0 auto}}
 </style></head><body>
 <header><div class="top"><div class="brand"><img src="/icon.png" alt="Triumfator – herb" width="48" height="48"><div class="tx"><h1>Triumfator</h1><div class="sub">Porównywarka statystyk piłkarskich</div></div></div><span id="clk" class="tm"></span></div>
-<div class="main"><button data-v="list" class="on">Mecze</button><button data-v="rank">Ranking</button><button data-v="vip">VIP</button><button data-v="pro" class="pb">Pewniaki PRO</button></div>
+<div class="main"><button data-v="list" class="on">Mecze</button><button data-v="rank">Ranking</button><button data-v="vip">VIP</button><button data-v="pro" class="pb">Pewniaki PRO</button><button data-v="worst">Dziurawe obrony</button></div>
 <div class="tabs" id="tabs"></div></header>
 <div id="st">Ładowanie…</div>
 <div id="list"></div>
@@ -68,6 +73,7 @@ input:focus,button:focus-visible{outline:2px solid var(--g);outline-offset:1px}.
 <div id="rk"></div></div>
 <div id="vip" hidden><div class="vnote">VIP · Najostrzejsze typy – żadna pewność, tylko spełnione kryteria · bez progu kursu (faworyt 1,00–2,00) · LIVE: pełna dominacja</div><div id="vp"></div></div>
 <div id="pro" hidden><div class="vnote">Pewniaki PRO · Etap 1: lista obserwowanych (kryteria ost. 5) · Etap 2: typ dopiero LIVE przy pełnej dominacji i presji w ost. 10 min · <b>Typy to spełnione kryteria, nie gwarancja</b></div><div id="pp"></div></div>
+<div id="worst" hidden><div class="vnote">Dziurawe obrony · najsłabsze drużyny z dzisiejszych meczów (LIVE + dziś) · ściśle 5/5 meczów · bez kursów · <b>Statystyki z ostatnich 5 meczów – forma, nie gwarancja</b></div><div id="wp"></div></div>
 <footer>Źródła: Superbet PL (oferta, kursy 1X2), Sportradar (statystyki strzałów). Godziny: Europe/Warsaw. Brak danych = „brak danych”, nic nie jest szacowane.</footer>
 <script>
 const $=s=>document.querySelector(s);let view='list',tab='live',rmode='all',M=null,R=null,open={};
@@ -78,7 +84,7 @@ function addDay(s,n){const d=new Date(s+'T12:00:00Z');d.setUTCDate(d.getUTCDate(
 function listTabs(){if(!M)return[];const t=M.today_warsaw,now=M.now_ts,L=M.matches,pre=L.filter(m=>m.mode!='live');
 const T=[['live','Live',L.filter(m=>m.mode=='live')],['h1','Za 1 godz.',pre.filter(m=>m.ts-now<=36e5)],['h3','Za 3 godz.',pre.filter(m=>m.ts-now<=108e5)],['d0','Dziś',pre.filter(m=>m.day_warsaw==t)],['d1','Jutro',pre.filter(m=>m.day_warsaw==addDay(t,1))]];
 for(let i=2;i<7;i++){const d=addDay(t,i),dd=new Date(d+'T12:00:00Z');T.push(['d'+i,DN[dd.getUTCDay()]+' '+d.slice(8)+'.'+d.slice(5,7),pre.filter(m=>m.day_warsaw==d)])}return T}
-function drawTabs(){const el=$('#tabs');if(view=='vip'||view=='pro'){el.innerHTML='';return}if(view=='list'){el.innerHTML=listTabs().map(([k,n,a])=>`<button data-t="${k}" class="${k==tab?'on':''}">${n}<span class="cnt">${a.length}</span></button>`).join('')}
+function drawTabs(){const el=$('#tabs');if(view=='vip'||view=='pro'){el.innerHTML='';return}if(view=='worst'){el.innerHTML=[['all','Dziś (wszystkie)'],['live','Live']].map(([k,n])=>`<button data-w="${k}" class="${k==wmode?'on':''}">${n}</button>`).join('');el.querySelectorAll('[data-w]').forEach(b=>b.onclick=()=>{wmode=b.dataset.w;drawTabs();loadWorst()});return}if(view=='list'){el.innerHTML=listTabs().map(([k,n,a])=>`<button data-t="${k}" class="${k==tab?'on':''}">${n}<span class="cnt">${a.length}</span></button>`).join('')}
 else el.innerHTML=[['live','Live'],['prematch','Przedmeczowe (dziś)'],['all','Wszystkie']].map(([k,n])=>`<button data-r="${k}" class="${k==rmode?'on':''}">${n}</button>`).join('');
 el.querySelectorAll('[data-t]').forEach(b=>b.onclick=()=>{tab=b.dataset.t;drawTabs();drawList();scrollTo(0,0)});
 el.querySelectorAll('[data-r]').forEach(b=>b.onclick=()=>{rmode=b.dataset.r;drawTabs();loadRank()})}
@@ -119,9 +125,10 @@ let rt=null;async function loadRank(){clearTimeout(rt);if(!R||R.status!='computi
 const q=new URLSearchParams({mode:rmode,min_games:$('#mg').value,odds_min:$('#omin').value.replace(',','.'),odds_max:$('#omax').value.replace(',','.')});
 try{R=await (await fetch('/api/ranking?'+q)).json();drawRank();if(R.status=='computing'&&view=='rank')rt=setTimeout(loadRank,4000)}catch(e){$('#st').innerHTML='<span class="err">Błąd: '+esc(e)+'</span>';rt=setTimeout(loadRank,5000)}}
 document.querySelectorAll('[data-v]').forEach(b=>b.onclick=()=>{view=b.dataset.v;document.querySelectorAll('[data-v]').forEach(x=>x.classList.toggle('on',x==b));
-$('#list').hidden=view!='list';$('#rank').hidden=view!='rank';$('#vip').hidden=view!='vip';$('#pro').hidden=view!='pro';drawTabs();if(view=='pro'){P?drawPro():0;loadPro()}else if(view=='rank'){R?drawRank():loadRank()}else if(view=='vip'){V?drawVip():0;loadVip()}else if(M)status(M)});
+$('#list').hidden=view!='list';$('#rank').hidden=view!='rank';$('#vip').hidden=view!='vip';$('#pro').hidden=view!='pro';$('#worst').hidden=view!='worst';drawTabs();if(view=='worst'){W?drawWorst():0;loadWorst()}else if(view=='pro'){P?drawPro():0;loadPro()}else if(view=='rank'){R?drawRank():loadRank()}else if(view=='vip'){V?drawVip():0;loadVip()}else if(M)status(M)});
 ['#mg','#omin','#omax'].forEach(s=>$(s).onchange=loadRank);
 setInterval(()=>{$('#clk').textContent=new Date().toLocaleTimeString('pl-PL',{timeZone:'Europe/Warsaw',hour:'2-digit',minute:'2-digit'})},1000);
+if(location.hash=='#najslabsi'||location.hash=='#dziurawe')document.querySelector('[data-v=worst]').click();
 if(location.hash=='#pro')document.querySelector('[data-v=pro]').click();
 if(location.hash=='#vip')document.querySelector('[data-v=vip]').click();
 if(location.hash=='#ranking')document.querySelector('[data-v=rank]').click();
@@ -154,4 +161,19 @@ h+=P.log.length?P.log.map(e=>`<div class="wl">${esc(e.time_warsaw)} · <b>${esc(
 $('#pp').innerHTML=h+`<div class="empty" style="padding:10px">Typy to spełnione kryteria, nie gwarancja · stan: ${esc(P.generated_warsaw)}</div>`;status(P)}
 async function loadPro(){clearTimeout(pt);try{P=await (await fetch('/api/pro')).json();drawPro()}catch(e){$('#st').innerHTML='<span class="err">Błąd: '+esc(e)+'</span>'}
 if(view=='pro')pt=setTimeout(loadPro,P&&P.status=='computing'?5000:50000)}
+
+let W=null,wt=null,wmode='all';
+const nd=x=>x==null?'<span class="nd">brak danych</span>':fv(x);
+function wrow(r,i,k){const w=r.ws,when=r.mode=='live'?`<span style="color:#ff5c75">● ${r.minutes!=null?esc(r.minutes)+"'":'LIVE'} ${esc(r.score||'')}</span>`:'start '+esc(r.start_warsaw||'');
+let v=k=='a'?`<span>stracone <b>${w.ga}</b> (${fv(w.ga_avg)}/m)</span><span>celne rywali ${nd(w.on_a_avg)}/m</span><span>strzały rywali ${nd(w.tot_a_avg)}/m</span><span>czyste konta ${w.clean}</span>`
+:k=='b'?`<span>strzelone <b>${w.gf}</b> (${fv(w.gf_avg)}/m)</span><span>celne ${nd(w.on_avg)}/m</span><span>strzały ${nd(w.tot_avg)}/m</span><span>bez gola ${w.blank}</span>`
+:`<span>bramki <b>${w.gf}:${w.ga}</b></span><span>bez gola ${w.blank}</span><span>czyste konta ${w.clean}</span>`;
+return `<div class="wr"><span class="wn">${i+1}</span><b>${esc(r.team)}</b> <small>(${r.side=='D'?'gosp.':'gość'}) vs ${esc(r.opponent||'')} · ${when}</small><br><small>${esc([r.category,r.tournament].filter(Boolean).join(' · ')||'brak danych')}</small><div class="wv">${v}</div><div class="wres">${esc(w.results)}</div></div>`}
+function drawWorst(){if(!W)return;if(W.status=='computing'){const p=W.progress||{};$('#wp').innerHTML='<div class="empty">Liczę formę drużyn ('+(p.done||0)+'/'+(p.total||'?')+' meczów)… Pierwsze liczenie może potrwać kilka minut.</div>';$('#st').textContent='Liczę… ('+(p.done||0)+'/'+(p.total||'?')+')';return}
+if(W.error){$('#wp').innerHTML='<div class="empty err">Błąd: '+esc(W.error)+'</div>';return}
+const sec=(t,a,k,n)=>`<h3 style="color:var(--g3);font-size:15px;margin:14px 10px 6px">${t} <small class="nd">(${n})</small></h3><div class="card">${a.length?a.map((r,i)=>wrow(r,i,k)).join(''):'<div class="empty">Brak drużyn</div>'}</div>`;
+$('#wp').innerHTML=sec('A · Dają sobie strzelać',W.conceding,'a',W.counts.conceding)+sec('B · Mało strzelają',W.scoring,'b',W.counts.scoring)+sec('C · Podwójnie słabi',W.double,'c',W.counts.double)
++`<div class="empty" style="padding:10px">Drużyn 5/5: ${W.counts.conceding} · za mało danych: ${W.too_few} · meczów w puli: ${W.footer.matches} (live ${W.footer.live_matches})<br>${esc(W.note)}</div>`;status(W)}
+async function loadWorst(){clearTimeout(wt);try{W=await (await fetch('/api/worst?mode='+wmode)).json();drawWorst()}catch(e){$('#st').innerHTML='<span class="err">Błąd: '+esc(e)+'</span>'}
+if(view=='worst')wt=setTimeout(loadWorst,W&&W.status=='computing'?5000:60000)}
 </script></body></html>

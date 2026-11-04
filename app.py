@@ -226,14 +226,15 @@ def team_last5(uid, exclude_br):
             gf, ga = (r["home"], r["away"]) if ish else (r["away"], r["home"])
             g = {"date": (x.get("time") or {}).get("date"), "uts": (x.get("time") or {}).get("uts"),
                  "opp": x["teams"]["away" if ish else "home"].get("name"), "ha": "D" if ish else "W",
-                 "score": "%s:%s" % (gf, ga), "gf": to_int(gf), "ga": to_int(ga), "on": None, "tot": None, "cor": None}
+                 "score": "%s:%s" % (gf, ga), "gf": to_int(gf), "ga": to_int(ga), "on": None, "tot": None, "cor": None,
+                 "on_a": None, "tot_a": None}
             if dd:
                 on, tot = dd.get("on"), dd.get("tot")
                 # same zera przy niezerowym wyniku = brak danych
                 if (gf or ga) and (on in (None, (0, 0))) and (tot in (None, (0, 0))):
                     on = tot = None
-                if on: g["on"] = on[i]
-                if tot: g["tot"] = tot[i]
+                if on: g["on"], g["on_a"] = on[i], on[1 - i]
+                if tot: g["tot"], g["tot_a"] = tot[i], tot[1 - i]
                 cor = dd.get("cor")
                 if cor and g["on"] is not None: g["cor"] = cor[i]
             games.append(g)
@@ -854,6 +855,123 @@ def get_pro():
         out["errors"] = dict(ERRORS); return out
     return {"status": "computing", "stage": v.get("stage") or "pro", "progress": v.get("progress") or {}, "errors": dict(ERRORS)}
 
+
+# ---------- Najsłabsi: ranking najsłabszych drużyn dnia (ost. 5, bez kursów) ----------
+def _avg(xs, n):
+    return round(sum(xs) / len(xs), 2) if len(xs) == n and n else None
+
+def weak_stats(games):
+    """Gole/strzały z ost. 5 meczów. Średnie strzałów tylko gdy dane z wszystkich 5 meczów (inaczej None)."""
+    gs = [g for g in (games or []) if g.get("gf") is not None and g.get("ga") is not None][:5]
+    n = len(gs)
+    col = lambda k: [g[k] for g in gs if g.get(k) is not None]
+    return {"games": n, "gf": sum(g["gf"] for g in gs), "ga": sum(g["ga"] for g in gs),
+            "gf_avg": round(sum(g["gf"] for g in gs) / n, 2) if n else None,
+            "ga_avg": round(sum(g["ga"] for g in gs) / n, 2) if n else None,
+            "clean": sum(1 for g in gs if g["ga"] == 0), "blank": sum(1 for g in gs if g["gf"] == 0),
+            "on_avg": _avg(col("on"), n), "tot_avg": _avg(col("tot"), n),
+            "on_a_avg": _avg(col("on_a"), n), "tot_a_avg": _avg(col("tot_a"), n),
+            "results": " ".join(g["score"] for g in gs)}
+
+def build_worst(rows, mode="all", n=5):
+    """rows: dict(team, ..., mode, ws). Zwraca sekcje A (traci najwięcej), B (strzela najmniej), C (obie najsłabsze tercje)."""
+    rows = [r for r in rows if mode != "live" or r.get("mode") == "live"]
+    ok = [r for r in rows if (r.get("ws") or {}).get("games", 0) >= n]
+    few = len(rows) - len(ok)
+    nz = lambda v, d: d if v is None else v
+    a = sorted(ok, key=lambda r: (-r["ws"]["ga"], -nz(r["ws"]["on_a_avg"], -1), r["ws"]["clean"], r["team"] or ""))
+    b = sorted(ok, key=lambda r: (r["ws"]["gf"], nz(r["ws"]["on_avg"], 99), -r["ws"]["blank"], r["team"] or ""))
+    third = (len(ok) + 2) // 3
+    ta = {id(r) for r in a[:third]}; tb = {id(r) for r in b[:third]}
+    pos_a = {id(r): i for i, r in enumerate(a)}; pos_b = {id(r): i for i, r in enumerate(b)}
+    c = sorted([r for r in ok if id(r) in ta and id(r) in tb], key=lambda r: (pos_a[id(r)] + pos_b[id(r)], r["ws"]["gf"] - r["ws"]["ga"]))
+    return {"conceding": a, "scoring": b, "double": c[:15], "too_few": few, "teams": len(rows), "third": third}
+
+def worst_pool():
+    evs = list(get_list("live"))
+    ids = {e["eventId"] for e in evs}
+    today = to_warsaw(datetime.now(timezone.utc)).strftime("%Y-%m-%d")
+    evs += [e for e in get_list("prematch") if e["eventId"] not in ids and e.get("day_warsaw") == today]
+    return evs
+
+def worst_event(ev):
+    """Obie drużyny meczu -> wiersze. Te same klucze cache co ranking/VIP (match_info, team_last5) - bez podwójnego pobierania."""
+    if not ev.get("br"): return ("nobr", [])
+    mi = match_info(ev["br"])
+    if not mi: return ("nostats", [])
+    out = []
+    for side, opp in (("home", "away"), ("away", "home")):
+        uid = mi[side]["uid"]
+        if not uid: continue
+        games = team_last5(uid, ev["br"])
+        out.append({"team": mi[side]["name"] or ev.get(side), "opponent": mi[opp]["name"] or ev.get(opp),
+                    "side": "D" if side == "home" else "W", "uid": uid,
+                    "tournament": mi.get("tournament") or ev.get("league"), "category": mi.get("category") or ev.get("country"),
+                    "mode": ev["mode"], "start_warsaw": ev.get("start_warsaw"), "minutes": ev.get("minutes"), "score": ev.get("score"),
+                    "eventId": ev["eventId"], "betradarId": ev["br"], "ws": weak_stats(games) if games is not None else {"games": 0}})
+    return ("ok", out)
+
+def worst(progress=None):
+    evs = worst_pool()
+    if progress is not None: progress.update(done=0, total=len(evs))
+    def run(e):
+        try: r = worst_event(e)
+        except Exception as ex:
+            ERRORS["najslabsi"] = "%s: %s" % (type(ex).__name__, ex); r = ("nostats", [])
+        if progress is not None:
+            with LOCK: progress["done"] += 1
+        return r
+    with ThreadPoolExecutor(4) as ex:
+        res = list(ex.map(run, evs))
+    rows, seen = [], set()
+    for _, rs in res:
+        for r in rs:
+            if (r["uid"], r["eventId"]) in seen: continue
+            seen.add((r["uid"], r["eventId"])); rows.append(r)
+    now = datetime.now(timezone.utc)
+    return {"generated_warsaw": to_warsaw(now).strftime("%Y-%m-%d %H:%M:%S"), "rows": rows,
+            "all": build_worst(rows, "all"), "live": build_worst(rows, "live"),
+            "footer": {"matches": len(evs), "live_matches": sum(1 for e in evs if e["mode"] == "live"),
+                       "without_betradar": sum(1 for k, _ in res if k == "nobr"), "without_stats": sum(1 for k, _ in res if k == "nostats")},
+            "note": "Statystyki z ostatnich 5 meczów – forma, nie gwarancja"}
+
+WORST_TTL = 240
+WORST_STATE = {"res": None, "t": 0, "job": None}
+
+def _worst_worker(prog):
+    try:
+        res = worst(prog)
+        with LOCK: WORST_STATE.update(res=res, t=time.time())
+    except Exception as e:
+        ERRORS["najslabsi"] = "%s: %s" % (type(e).__name__, e)
+    finally:
+        with LOCK: WORST_STATE["job"] = None
+
+def _slim(r):
+    return {k: r[k] for k in ("team", "opponent", "side", "tournament", "category", "mode", "start_warsaw", "minutes", "score", "eventId", "ws")}
+
+def get_worst(mode="all"):
+    mode = "live" if mode == "live" else "all"
+    with LOCK:
+        res, t, job = WORST_STATE["res"], WORST_STATE["t"], WORST_STATE["job"]
+        fresh = res is not None and time.time() - t < WORST_TTL
+        if not fresh and job is None:
+            job = WORST_STATE["job"] = {"progress": {"done": 0, "total": 0}, "started": time.time()}
+            threading.Thread(target=_worst_worker, args=(job["progress"],), daemon=True).start()
+    if res is not None:
+        w = res[mode]
+        out = {"status": "ready", "stale": not fresh, "age_seconds": round(time.time() - t), "mode": mode,
+               "generated_warsaw": res["generated_warsaw"], "note": res["note"], "footer": res["footer"],
+               "teams": w["teams"], "too_few": w["too_few"], "third": w["third"],
+               "conceding": [_slim(r) for r in w["conceding"][:25]], "scoring": [_slim(r) for r in w["scoring"][:25]],
+               "double": [_slim(r) for r in w["double"]],
+               "counts": {"conceding": len(w["conceding"]), "scoring": len(w["scoring"]), "double": len(w["double"])},
+               "errors": dict(ERRORS)}
+        if job: out["progress"] = dict(job["progress"])
+        return out
+    return {"status": "computing", "progress": dict(job["progress"]), "elapsed_seconds": round(time.time() - job["started"]),
+            "errors": dict(ERRORS)}
+
 # ---------- ranking w tle (single-flight + cache) ----------
 TTL = {"live": 180, "prematch": 600, "all": 180}
 JOBS = {}                             # klucz -> {"thread", "progress", "started"}
@@ -944,6 +1062,10 @@ class H(BaseHTTPRequestHandler):
             return self.send(200, "ok", "text/plain")
         if u.path == "/api/vip":
             try: return self.send(200, json.dumps(get_vip(), ensure_ascii=False), "application/json; charset=utf-8")
+            except Exception as e: return self.send(500, json.dumps({"error": str(e)}), "application/json")
+        if u.path == "/api/worst":
+            q = dict(urllib.parse.parse_qsl(u.query))
+            try: return self.send(200, json.dumps(get_worst(q.get("mode", "all")), ensure_ascii=False), "application/json; charset=utf-8")
             except Exception as e: return self.send(500, json.dumps({"error": str(e)}), "application/json")
         if u.path == "/api/pro":
             try: return self.send(200, json.dumps(get_pro(), ensure_ascii=False), "application/json; charset=utf-8")
