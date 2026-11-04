@@ -1257,25 +1257,48 @@ WORST_STATE = {"res": None, "t": 0, "job": None}
 def _worst_worker(prog):
     try:
         res = holes(prog)
-        with LOCK: WORST_STATE.update(res=res, t=time.time())
+        with LOCK: WORST_STATE.update(res=res, t=time.time()); ERRORS.pop("dziurawe_job", None)
     except Exception as e:
         ERRORS["najslabsi"] = "%s: %s" % (type(e).__name__, e)
     finally:
-        with LOCK: WORST_STATE["job"] = None
+        with LOCK:
+            if WORST_STATE["job"] is not None and WORST_STATE["job"]["progress"] is prog: WORST_STATE["job"] = None
 
 def _slim(r):
     return {k: r[k] for k in ("team", "opponent", "side", "tournament", "category", "mode", "start_warsaw", "minutes", "score", "eventId", "ws")}
+
+WORST_JOB_MAX = 600   # zawieszone liczenie (>10 min) nie blokuje kolejnego
+
+def worst_overlay(res, live_evs, now_utc=None):
+    """Nakłada świeże minuty/wynik z listy LIVE (cache 55 s, tanie) na ranking; usuwa zakończone mecze."""
+    now_utc = now_utc or datetime.now(timezone.utc)
+    out = dict(res)
+    cur = {e["eventId"]: e for e in (live_evs or [])}
+    if cur:
+        lst = []
+        for r in res.get("list") or []:
+            e = cur.get(r.get("eventId"))
+            if e is None: continue
+            r = dict(r); r["minutes"], r["score"] = e.get("minutes"), e.get("score"); lst.append(r)
+        for i, r in enumerate(lst): r["rank"] = i + 1
+        out["list"] = lst
+        out["live_warsaw"] = to_warsaw(now_utc).strftime("%Y-%m-%d %H:%M:%S")
+    return out
 
 def get_worst(mode="all"):
     mode = "live" if mode == "live" else "all"
     with LOCK:
         res, t, job = WORST_STATE["res"], WORST_STATE["t"], WORST_STATE["job"]
         fresh = res is not None and time.time() - t < WORST_TTL
+        if job is not None and time.time() - job["started"] > WORST_JOB_MAX:
+            ERRORS["dziurawe_job"] = "liczenie > %d s – restart" % WORST_JOB_MAX; job = WORST_STATE["job"] = None
         if not fresh and job is None:
             job = WORST_STATE["job"] = {"progress": {"done": 0, "total": 0}, "started": time.time()}
             threading.Thread(target=_worst_worker, args=(job["progress"],), daemon=True).start()
     if res is not None:
-        out = dict(res); out.update(status="ready", stale=not fresh, age_seconds=round(time.time() - t), errors=dict(ERRORS))
+        try: live_evs = get_list("live")
+        except Exception: live_evs = None
+        out = worst_overlay(res, live_evs); out.update(status="ready", stale=not fresh, age_seconds=round(time.time() - t), errors=dict(ERRORS))
         if job: out["progress"] = dict(job["progress"])
         return out
     return {"status": "computing", "progress": dict(job["progress"]), "elapsed_seconds": round(time.time() - job["started"]),

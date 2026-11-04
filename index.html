@@ -224,7 +224,15 @@ el.innerHTML=`<div class="hx"><div class="hbar"><input id="hq" type="search" pla
 <div class="hfoot">Na liście: <b>${c.listed}</b> · meczów LIVE: ${W.footer.live_matches} · drużyn: ${c.teams} · za mało danych: ${c.too_few} · nieaktualne (>${c.recent_days||90} dni): ${c.stale||0} · poniżej 40: ${c.below}${c.no_shots?' · bez strzałów: '+c.no_shots:''}<br><b>${esc(W.note)}</b><details style="margin-top:6px;text-align:left"><summary>Jak liczymy temperaturę</summary>${esc(W.rule||'')}</details><details style="margin-top:6px;text-align:left"><summary>Jak liczymy szansę na gola rywala</summary>${esc(W.chance_rule||'')}</details></div></div>`;
 const i=$('#hq');i.oninput=()=>{hq=i.value;drawWorst()};if(keep){i.focus();i.setSelectionRange(i.value.length,i.value.length)}
 $('#hall').onclick=()=>{const all=a.every(r=>HO[hk(r)]);a.forEach(r=>HO[hk(r)]=!all);drawWorst()};
-el.querySelectorAll('.hc .hh').forEach(b=>b.onclick=()=>{const c=b.parentNode,k=c.dataset.k;HO[k]=!HO[k];c.classList.toggle('op',HO[k]);$('#hall').textContent=a.length&&a.every(r=>HO[hk(r)])?'Zwiń wszystko':'Rozwiń wszystko'});status(W)}
-async function loadWorst(){clearTimeout(wt);try{W=await (await fetch('/api/worst')).json();drawWorst()}catch(e){$('#st').innerHTML='<span class="err">Błąd: '+esc(e)+'</span>'}
-if(view=='worst')wt=setTimeout(loadWorst,W&&W.status=='computing'?4000:60000)}
+el.querySelectorAll('.hc .hh').forEach(b=>b.onclick=()=>{const c=b.parentNode,k=c.dataset.k;HO[k]=!HO[k];c.classList.toggle('op',HO[k]);$('#hall').textContent=a.length&&a.every(r=>HO[hk(r)])?'Zwiń wszystko':'Rozwiń wszystko'});wstatus()}
+let WT=0,WB=false;
+const hms=s=>(s||'').slice(11,19);
+function wstatus(){if(!W||W.status!='ready'||view!='worst')return;const ago=(Date.now()-WT)/1000,lage=W.live_warsaw?ago:(W.age_seconds||0)+ago,rage=(W.age_seconds||0)+ago,old=lage>180||rage>300,e=Object.entries(W.errors||{});
+$('#st').innerHTML=`Aktualizacja: ${hms(W.live_warsaw||W.generated_warsaw)} (czas Warszawy) · ranking: ${hms(W.generated_warsaw)}`+(old?` <span class="err">⚠ dane starsze niż ${Math.floor(Math.max(lage,rage>300?rage:0)/60)} min</span>`:'')+(WB?' · odświeżam…':'')+(e.length?`<div class="err">Błąd źródła (pokazuję ostatni cache): ${esc(e.map(x=>x.join(': ')).join('; '))}</div>`:'')}
+setInterval(wstatus,5000);
+async function loadWorst(){clearTimeout(wt);WB=true;wstatus();const ac=new AbortController(),to=setTimeout(()=>ac.abort(),25000);
+try{const d=await (await fetch('/api/worst?_='+Date.now(),{cache:'no-store',signal:ac.signal})).json();if(d.status=='ready'||!W||W.status!='ready'){W=d;WT=Date.now();drawWorst()}}catch(e){$('#st').innerHTML='<span class="err">Błąd: '+esc(e)+' – ponawiam</span>'}
+clearTimeout(to);WB=false;wstatus();if(view=='worst')wt=setTimeout(loadWorst,W&&W.status=='computing'?4000:60000)}
+document.addEventListener('visibilitychange',()=>{if(!document.hidden&&view=='worst'&&(Date.now()-WT)>30000)loadWorst()});
+window.addEventListener('focus',()=>{if(view=='worst'&&(Date.now()-WT)>30000)loadWorst()});
 </script></body></html>

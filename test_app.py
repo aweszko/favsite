@@ -443,3 +443,11 @@ class TestSharedRecency(unittest.TestCase):
     def test_qualifies_rejects_stale(self):
         r = {"stats": {"games_with_data": 5}, "opp_stats": {"games_with_data": 5}}
         self.assertTrue(app.qualifies(r)); r["stale"] = True; self.assertFalse(app.qualifies(r))
+    def test_worst_overlay_fresh_minutes(self):
+        res = {"generated_warsaw": "x", "list": [{"eventId": 1, "minutes": "56", "score": "2:0", "rank": 1},
+                                                 {"eventId": 2, "minutes": "70", "score": "0:0", "rank": 2},
+                                                 {"eventId": 3, "minutes": "10", "score": "0:0", "rank": 3}]}
+        out = app.worst_overlay(res, [{"eventId": 1, "minutes": "67", "score": "3:0"}, {"eventId": 3, "minutes": "21", "score": "1:0"}])
+        self.assertEqual([(r["eventId"], r["minutes"], r["score"], r["rank"]) for r in out["list"]], [(1, "67", "3:0", 1), (3, "21", "1:0", 2)])
+        self.assertIn("live_warsaw", out); self.assertEqual(res["list"][0]["minutes"], "56")
+        self.assertEqual(len(app.worst_overlay(res, [])["list"]), 3)   # brak listy LIVE -> bez zmian
