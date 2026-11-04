@@ -1110,7 +1110,7 @@ WEAK_ATT = 0.8         # rywal strzelający < 0,8 gola/mecz: wynik mocno obniżo
 CHANCE_RULE = ("Szansa na gola rywala (0–100) = 100 × [35% · temperatura obrony/100 + 35% · min(1, śr. goli rywala z ost. 5 meczów (≤90 dni) / 2) + "
                "10% · min(1, śr. celnych rywala / 6) (gdy brak: strzały / 15) + 20% · presja LIVE (udział rywala w celnych, rożnych i groźnych atakach "
                "w tym meczu, średnia z dostępnych)]. Brakujące składniki są pomijane, a wagi przeskalowane. Gdy rywal strzela < 0,8 gola/mecz: "
-               "wynik × 0,5 i maks. 30. Brak danych o ataku rywala: przyjmujemy 1,35 [średnia ligowa] i maks. 50.")
+               "wynik × 0,5 i maks. 30. Gdy w tym meczu po 30+ min rywal ma ≤1 celny oraz 0 rożnych lub < 35% groźnych ataków: wynik × 0,5 i maks. 30. Brak danych o ataku rywala: przyjmujemy 1,35 [średnia ligowa] i maks. 50.")
 
 def live_pressure(live):
     """Udział rywala (indeks 1) w celnych/rożnych/groźnych atakach LIVE. None gdy brak."""
@@ -1124,7 +1124,20 @@ def live_pressure(live):
     if not parts: return None
     return {"share": round(sum(parts.values()) / len(parts), 2), "parts": parts}
 
-def goal_chance(t, opp_att, live):
+def live_dead(live, minutes):
+    """Rywal praktycznie nie atakuje w tym meczu: po 30+ min ≤1 celny i (0 rożnych lub udział w groźnych atakach < 35%)."""
+    m = to_int(str(minutes or "").split("+")[0].strip("'"))
+    if not live or m is None or m < 30: return False
+    on = live.get("on"); cor = live.get("cor"); da = live.get("da")
+    if not on or on[1] is None or (to_int(on[1]) or 0) > 1: return False
+    c0 = bool(cor) and cor[1] is not None and (to_int(cor[1]) or 0) == 0
+    dlow = False
+    if da and da[0] is not None and da[1] is not None:
+        a, b = to_int(da[0]) or 0, to_int(da[1]) or 0
+        dlow = a + b > 0 and b / (a + b) < 0.35
+    return c0 or dlow
+
+def goal_chance(t, opp_att, live, minutes=None):
     """Łączy temperaturę obrony z siłą ataku rywala (+ LIVE). Zwraca dict z wynikiem i składnikami."""
     if not t: return None
     comp, notes = [], []
@@ -1144,6 +1157,8 @@ def goal_chance(t, opp_att, live):
     if ga is None: v = min(v, 50)
     elif ga < WEAK_ATT:
         v = min(v * 0.5, 30); notes.append("rywal strzela < 0,8 gola/mecz – wynik ×0,5, maks. 30")
+    if live_dead(live, minutes):
+        v = min(v * 0.5, 30); notes.append("LIVE: rywal po 30+ min praktycznie nie atakuje (≤1 celny, 0 rożnych lub mało groźnych ataków) – wynik ×0,5, maks. 30")
     sc = int(round(v))
     return {"score": sc, "label": "wysoka" if sc >= 65 else "średnia" if sc >= 45 else "niska", "opp_gf_avg": ga,
             "live_share": lp["share"] if lp else None, "notes": notes,
@@ -1214,7 +1229,7 @@ def holes(progress=None):
     for r in rows:
         o = [x for x in by_ev[r["eventId"]] if x is not r]
         r["opp_att"] = opp_attack_summary(o[0]["_g"]) if o else None
-        r["chance"] = goal_chance(r.get("t"), r["opp_att"], r.get("live"))
+        r["chance"] = goal_chance(r.get("t"), r["opp_att"], r.get("live"), r.get("minutes"))
     full = [r for r in rows if r.get("t")]
     lst = holes_rank(full)
     def prof(r):

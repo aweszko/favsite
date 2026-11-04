@@ -322,6 +322,11 @@ class TestChance(unittest.TestCase):
     def test_live_pressure(self):
         self.assertEqual(app.live_pressure({"on": [1, 3], "cor": None, "da": [0, 0]})["share"], 0.62)
         self.assertIsNone(app.live_pressure({"on": None}))
+    def test_live_dead_penalty(self):
+        A = {"gf_avg": 2.0, "on_avg": 5.0, "tot_avg": 14.0}; L = {"on": [6, 0], "cor": [5, 0], "da": [40, 12]}
+        self.assertLessEqual(app.goal_chance(self.T, A, L, "56")["score"], 30)
+        self.assertGreater(app.goal_chance(self.T, A, L, "20")["score"], 30)
+        self.assertFalse(app.live_dead({"on": [2, 3], "cor": [1, 0], "da": [10, 5]}, 60))
     def test_rank_by_chance_then_temp(self):
         mk = lambda n, t, c: {"team": n, "t": {"temp": t}, "ga_raw": 5, "chance": {"score": c}}
         r = app.holes_rank([mk("SanMartin", 95, 20), mk("B", 60, 70), mk("C", 80, 70), mk("D", 30, 99)])
