@@ -935,12 +935,194 @@ def worst(progress=None):
                        "without_betradar": sum(1 for k, _ in res if k == "nobr"), "without_stats": sum(1 for k, _ in res if k == "nostats")},
             "note": "Statystyki z ostatnich 5 meczów – forma, nie gwarancja"}
 
-WORST_TTL = 240
+
+# ---------- Dziurawe obrony v2: tylko LIVE, temperatura z korektą siły rywala ----------
+LEAGUE_AVG = 1.35      # fallback: typowa średnia goli drużyny na mecz
+GA_CAP = 4             # cap goli straconych w meczu
+TIER_W = 0.5           # waga meczu z rywalem z innej ligi
+TEMP_MIN = 40
+WORST_RULE = ("Dla każdego z 5 meczów: gole stracone obcinamy do 4 (cap), a potem odejmujemy średnią goli strzelanych przez tego rywala "
+              "w jego ost. 5 meczach (bez meczu z tą drużyną): nadwyżka = max(0, min(stracone,4) − śr. rywala). Gdy brak danych o rywalu: "
+              "nadwyżka = max(0, min(stracone,4) − 1,35 [średnia ligowa]). Mecz ma wagę ×0,5, gdy główna liga rywala (najczęstsza rozgrywka "
+              "w jego ost. 15 meczach) różni się od głównej ligi drużyny (np. puchar z zespołem z wyższej ligi, puchary europejskie). "
+              "Temperatura = 100 × [40% · min(1, śr. ważona nadwyżki / 2) + 30% · min(1, śr. celnych rywali / 7) + "
+              "20% · udział meczów ze straconym golem + 10% · min(1, śr. strzałów rywali / 18)]; bez strzałów: (40%·G + 20%·C) / 60%.")
+
+def lastx_raw(uid):
+    def f():
+        d = gismo("stats_team_lastx/%s/15" % uid)
+        return d if isinstance(d, dict) else ({} if d is not None else None)
+    return cached("lx:%s" % uid, TEAM_TTL, f)
+
+def _done(d):
+    return [x for x in ((d or {}).get("matches") or []) if (x.get("result") or {}).get("home") is not None]
+
+def primary_league(d):
+    c = {}
+    for x in _done(d):
+        k = x.get("_utid") or x.get("_tid")
+        if k is not None: c[k] = c.get(k, 0) + 1
+    return max(c, key=lambda k: (c[k], str(k))) if c else None
+
+def opp_attack(uid, exclude_mid):
+    """Średnia goli strzelanych przez rywala w jego ost. 5 (bez wskazanego meczu) + jego główna liga."""
+    if not uid: return None
+    d = lastx_raw(uid)
+    if not d: return None
+    ms = [x for x in _done(d) if str(x.get("_id")) != str(exclude_mid)]
+    ms.sort(key=lambda x: (x.get("time") or {}).get("uts") or 0, reverse=True)
+    gf = []
+    for x in ms[:5]:
+        ish = (x["teams"]["home"].get("uid") == uid)
+        v = to_int(x["result"]["home"] if ish else x["result"]["away"])
+        if v is not None: gf.append(v)
+    if len(gf) < 3: return None
+    return {"avg": round(sum(gf) / len(gf), 2), "n": len(gf), "league": primary_league(d)}
+
+def team_games(uid, exclude_br):
+    """Ost. 5 meczów z uid rywala, rozgrywką i strzałami (te same klucze det: co ranking)."""
+    def f():
+        d = lastx_raw(uid)
+        if d is None: return None
+        tours = d.get("tournaments") or {}
+        ms = [x for x in _done(d) if str(x.get("_id")) != str(exclude_br)]
+        ms.sort(key=lambda x: (x.get("time") or {}).get("uts") or 0, reverse=True)
+        out = []
+        for x in ms[:5]:
+            ish = (x["teams"]["home"].get("uid") == uid); i = 0 if ish else 1
+            r = x["result"]; gf, ga = (r["home"], r["away"]) if ish else (r["away"], r["home"])
+            o = x["teams"]["away" if ish else "home"]
+            g = {"mid": x.get("_id"), "date": (x.get("time") or {}).get("date"), "uts": (x.get("time") or {}).get("uts"),
+                 "opp": o.get("name"), "opp_uid": o.get("uid"), "ha": "D" if ish else "W",
+                 "comp": (tours.get(str(x.get("_tid"))) or {}).get("name"), "league": x.get("_utid") or x.get("_tid"),
+                 "score": "%s:%s" % (gf, ga), "gf": to_int(gf), "ga": to_int(ga), "on_a": None, "tot_a": None}
+            dd = match_details(x["_id"])
+            if dd:
+                on, tot = dd.get("on"), dd.get("tot")
+                if (g["gf"] or g["ga"]) and on in (None, (0, 0)) and tot in (None, (0, 0)): on = tot = None
+                if on: g["on_a"] = on[1 - i]
+                if tot: g["tot_a"] = tot[1 - i]
+            out.append(g)
+        return {"games": out, "league": primary_league(d)}
+    return cached("tg:%s:%s" % (uid, exclude_br), TEAM_TTL, f)
+
+def adjust_games(games, team_league, opp_info):
+    """opp_info: lista (dict|None) per mecz. Zwraca mecze z polami excess/weight/capped/notes."""
+    out = []
+    for g, oi in zip(games, opp_info):
+        g = dict(g); ga = g["ga"] or 0
+        cg = min(ga, GA_CAP); g["capped"] = ga > GA_CAP
+        notes = []
+        if g["capped"]: notes.append("cap: liczone %d z %d goli" % (GA_CAP, ga))
+        if oi and oi.get("avg") is not None:
+            g["opp_avg"] = oi["avg"]; g["excess"] = round(max(0.0, cg - oi["avg"]), 2)
+        else:
+            g["opp_avg"] = None; g["excess"] = round(max(0.0, cg - LEAGUE_AVG), 2)
+            notes.append("brak danych o sile rywala")
+        w = 1.0
+        ol = (oi or {}).get("league")
+        if team_league is not None and ol is not None and ol != team_league:
+            w = TIER_W; notes.append("rywal z innej ligi – waga ×0,5")
+        g["weight"] = w; g["notes"] = notes
+        out.append(g)
+    return out
+
+def temperature(adj):
+    """adj: 5 meczów po adjust_games. Zwraca dict temp/komponenty albo None gdy <5."""
+    if len(adj) < 5: return None
+    W = sum(g["weight"] for g in adj)
+    G = sum(g["weight"] * g["excess"] for g in adj) / W
+    C = sum(g["weight"] * (1 if (g["ga"] or 0) > 0 else 0) for g in adj) / W
+    sg, sc = min(1.0, G / 2.0), C
+    on = [g["on_a"] for g in adj]; tot = [g["tot_a"] for g in adj]
+    shots = None not in on and None not in tot
+    if shots:
+        so, st = min(1.0, sum(on) / 5 / 7.0), min(1.0, sum(tot) / 5 / 18.0)
+        t = 0.4 * sg + 0.3 * so + 0.2 * sc + 0.1 * st
+    else:
+        so = st = None; t = (0.4 * sg + 0.2 * sc) / 0.6
+    temp = int(round(100 * t))
+    return {"temp": temp, "label": temp_label(temp), "shots": shots, "g_excess_avg": round(G, 2), "conceded_share": round(C, 2),
+            "on_a_avg": round(sum(on) / 5, 1) if shots else None, "tot_a_avg": round(sum(tot) / 5, 1) if shots else None}
+
+def temp_label(t):
+    return "bardzo dziurawa" if t >= 80 else "dziurawa" if t >= 60 else "przepuszcza"
+
+def holes_rank(rows):
+    """Sort: temperatura malejąco, potem surowe gole stracone, potem nazwa. <TEMP_MIN wypada."""
+    ok = [r for r in rows if r.get("t") and r["t"]["temp"] >= TEMP_MIN]
+    ok.sort(key=lambda r: (-r["t"]["temp"], -r["ga_raw"], r["team"] or ""))
+    for i, r in enumerate(ok, 1): r["rank"] = i
+    return ok
+
+def holes_event(ev, opp_cache):
+    if not ev.get("br"): return ("nobr", [])
+    mi = match_info(ev["br"])
+    if not mi: return ("nostats", [])
+    live = None
+    try: live = live_details(ev["br"])
+    except Exception: live = None
+    out = []
+    for side, opp in (("home", "away"), ("away", "home")):
+        uid = mi[side]["uid"]
+        if not uid: continue
+        tg = team_games(uid, ev["br"])
+        games = (tg or {}).get("games") or []
+        row = {"team": mi[side]["name"] or ev.get(side), "opponent": mi[opp]["name"] or ev.get(opp), "side": "D" if side == "home" else "W",
+               "uid": uid, "tournament": mi.get("tournament") or ev.get("league"), "category": mi.get("category") or ev.get("country"),
+               "minutes": ev.get("minutes"), "score": ev.get("score"), "eventId": ev["eventId"], "games_n": len(games), "t": None}
+        if len(games) >= 5 and all(g["ga"] is not None and g["gf"] is not None for g in games):
+            infos = []
+            for g in games:
+                k = (g["opp_uid"], g["mid"])
+                if k not in opp_cache:
+                    try: opp_cache[k] = opp_attack(g["opp_uid"], g["mid"])
+                    except Exception: opp_cache[k] = None
+                infos.append(opp_cache[k])
+            adj = adjust_games(games, tg.get("league"), infos)
+            row.update(games=adj, ga_raw=sum(g["ga"] for g in adj), gf_raw=sum(g["gf"] for g in adj),
+                       clean=sum(1 for g in adj if g["ga"] == 0), two_plus=sum(1 for g in adj if g["ga"] >= 2),
+                       t=temperature(adj))
+            if live:
+                i = 0 if side == "home" else 1
+                row["live"] = {k: (None if not live.get(k) else [live[k][i], live[k][1 - i]]) for k in ("on", "cor", "da")}
+        out.append(row)
+    return ("ok", out)
+
+def holes(progress=None):
+    evs = list(get_list("live"))
+    if progress is not None: progress.update(done=0, total=len(evs))
+    opp_cache = {}
+    def run(e):
+        try: r = holes_event(e, opp_cache)
+        except Exception as ex:
+            ERRORS["dziurawe"] = "%s: %s" % (type(ex).__name__, ex); r = ("nostats", [])
+        if progress is not None:
+            with LOCK: progress["done"] += 1
+        return r
+    with ThreadPoolExecutor(4) as ex:
+        res = list(ex.map(run, evs))
+    rows, seen = [], set()
+    for _, rs in res:
+        for r in rs:
+            if (r["uid"], r["eventId"]) in seen: continue
+            seen.add((r["uid"], r["eventId"])); rows.append(r)
+    full = [r for r in rows if r.get("t")]
+    lst = holes_rank(full)
+    now = datetime.now(timezone.utc)
+    return {"generated_warsaw": to_warsaw(now).strftime("%Y-%m-%d %H:%M:%S"), "list": lst,
+            "counts": {"teams": len(rows), "listed": len(lst), "too_few": len(rows) - len(full), "below": len(full) - len(lst),
+                       "no_shots": sum(1 for r in lst if not r["t"]["shots"])},
+            "footer": {"live_matches": len(evs), "without_betradar": sum(1 for k, _ in res if k == "nobr"),
+                       "without_stats": sum(1 for k, _ in res if k == "nostats")},
+            "rule": WORST_RULE, "note": "Statystyki z ostatnich 5 meczów – forma, nie gwarancja"}
+
+WORST_TTL = 120
 WORST_STATE = {"res": None, "t": 0, "job": None}
 
 def _worst_worker(prog):
     try:
-        res = worst(prog)
+        res = holes(prog)
         with LOCK: WORST_STATE.update(res=res, t=time.time())
     except Exception as e:
         ERRORS["najslabsi"] = "%s: %s" % (type(e).__name__, e)
@@ -959,14 +1141,7 @@ def get_worst(mode="all"):
             job = WORST_STATE["job"] = {"progress": {"done": 0, "total": 0}, "started": time.time()}
             threading.Thread(target=_worst_worker, args=(job["progress"],), daemon=True).start()
     if res is not None:
-        w = res[mode]
-        out = {"status": "ready", "stale": not fresh, "age_seconds": round(time.time() - t), "mode": mode,
-               "generated_warsaw": res["generated_warsaw"], "note": res["note"], "footer": res["footer"],
-               "teams": w["teams"], "too_few": w["too_few"], "third": w["third"],
-               "conceding": [_slim(r) for r in w["conceding"][:25]], "scoring": [_slim(r) for r in w["scoring"][:25]],
-               "double": [_slim(r) for r in w["double"]],
-               "counts": {"conceding": len(w["conceding"]), "scoring": len(w["scoring"]), "double": len(w["double"])},
-               "errors": dict(ERRORS)}
+        out = dict(res); out.update(status="ready", stale=not fresh, age_seconds=round(time.time() - t), errors=dict(ERRORS))
         if job: out["progress"] = dict(job["progress"])
         return out
     return {"status": "computing", "progress": dict(job["progress"]), "elapsed_seconds": round(time.time() - job["started"]),

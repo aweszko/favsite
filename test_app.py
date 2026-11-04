@@ -272,6 +272,40 @@ class TGist(unittest.TestCase):
         self.assertFalse(app.gist_push_now()); self.assertIn("gist", app.ERRORS)
         self.assertNotIn("x-test", str(app.ERRORS))
 
+
+class TestHoles(unittest.TestCase):
+    def g(self, ga, on=4, tot=12, gf=1):
+        return {"gf": gf, "ga": ga, "on_a": on, "tot_a": tot, "score": "%d:%d" % (gf, ga)}
+    def test_cap_and_excess(self):
+        a = app.adjust_games([self.g(8)], 10, [{"avg": 1.0, "league": 10}])[0]
+        self.assertTrue(a["capped"]); self.assertEqual(a["excess"], 3.0); self.assertEqual(a["weight"], 1.0)
+    def test_excess_floor_zero(self):
+        a = app.adjust_games([self.g(1)], 10, [{"avg": 2.5, "league": 10}])[0]
+        self.assertEqual(a["excess"], 0.0)
+    def test_other_tier_downweighted(self):
+        a = app.adjust_games([self.g(3)], 10, [{"avg": 2.0, "league": 99}])[0]
+        self.assertEqual(a["weight"], 0.5); self.assertIn("rywal z innej ligi – waga ×0,5", a["notes"])
+    def test_missing_opp_fallback(self):
+        a = app.adjust_games([self.g(6)], 10, [None])[0]
+        self.assertEqual(a["excess"], round(4 - app.LEAGUE_AVG, 2)); self.assertEqual(a["weight"], 1.0)
+        self.assertIn("brak danych o sile rywala", a["notes"])
+    def test_cup_blowout_does_not_dominate(self):
+        # Tarnobrzeg: 0:8 z Lechem (inna liga, Lech śr. 2,4) + 4 x 1 stracony z ligowcami śr. 1,2
+        cup = app.adjust_games([self.g(8)] + [self.g(1)] * 4, 1, [{"avg": 2.4, "league": 2}] + [{"avg": 1.2, "league": 1}] * 4)
+        steady = app.adjust_games([self.g(2)] * 5, 1, [{"avg": 1.0, "league": 1}] * 5)
+        self.assertLess(app.temperature(cup)["temp"], app.temperature(steady)["temp"])
+    def test_temperature_full_and_no_shots(self):
+        adj = app.adjust_games([self.g(3, 7, 18)] * 5, 1, [{"avg": 1.0, "league": 1}] * 5)
+        t = app.temperature(adj); self.assertEqual(t["temp"], 100); self.assertEqual(t["label"], "bardzo dziurawa"); self.assertTrue(t["shots"])
+        adj = app.adjust_games([self.g(2, None, None)] * 5, 1, [{"avg": 1.0, "league": 1}] * 5)
+        t = app.temperature(adj); self.assertFalse(t["shots"]); self.assertEqual(t["temp"], round(100 * (0.4 * 0.5 + 0.2) / 0.6))
+    def test_requires_five(self):
+        self.assertIsNone(app.temperature(app.adjust_games([self.g(3)] * 4, 1, [None] * 4)))
+    def test_rank_sort_and_threshold(self):
+        mk = lambda n, t, ga: {"team": n, "t": {"temp": t}, "ga_raw": ga}
+        r = app.holes_rank([mk("A", 50, 5), mk("B", 90, 9), mk("C", 39, 20), mk("D", 50, 8)])
+        self.assertEqual([x["team"] for x in r], ["B", "D", "A"]); self.assertEqual(r[0]["rank"], 1)
+
 if __name__ == "__main__":
     unittest.main()
 
