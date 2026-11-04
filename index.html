@@ -66,6 +66,7 @@ input:focus,button:focus-visible{outline:2px solid var(--g);outline-offset:1px}.
 .hc.hot{border-color:var(--b2);box-shadow:inset 4px 0 0 var(--b2),0 2px 12px #7a0c1f55}
 .hh{display:block;width:100%;text-align:left;background:none;border:0;color:var(--t);padding:12px 14px;min-height:64px;cursor:pointer;font:inherit}
 .ht{display:flex;align-items:baseline;gap:6px;font-size:16px;font-weight:700;color:var(--g3)}.ht .hrk{color:var(--g);min-width:24px}.ht .ga{color:var(--sv);font-weight:500;font-size:14px;white-space:nowrap}.ht .nm{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.l5{display:flex;gap:8px;margin:3px 0 1px;font-size:12.5px;color:var(--sv);font-variant-numeric:tabular-nums}.l5 em{font-style:normal;color:#ff5a6e;font-weight:700}
 .ht .ar{margin-left:auto;color:var(--g);transition:transform .3s}.hc.op .ar{transform:rotate(180deg)}
 .hm{font-size:12px;color:var(--s);margin:3px 0 0 30px;display:flex;flex-wrap:wrap;gap:4px 8px;align-items:center}
 .chip{display:inline-flex;gap:4px;align-items:center;padding:2px 8px;border-radius:10px;background:#3a0a14;color:#ff9aa9;font-weight:700;font-size:12px}
@@ -197,6 +198,7 @@ const L=r.live,lr=(n,k)=>`<tr><td>${n}</td><td>${L&&L[k]?L[k][0]:'–'}</td><td>
 const lv=L&&(L.on||L.cor||L.da)?`<table class="lv"><tr><td></td><td>${esc((r.team||'').slice(0,10))}</td><td>${esc((r.opponent||'').slice(0,10))}</td></tr>${lr('Celne','on')}${lr('Rożne','cor')}${lr('Groźne ataki','da')}</table>`:'<span class="nd">brak danych</span>';
 const adjn=r.games.some(g=>g.notes.length)?'<div class="hn">⚖ waga ×0,5 = rywal z innej ligi (np. puchar z mocniejszym zespołem); cap = gole powyżej 4 w meczu nie są liczone; nadwyżka = stracone (max 4) − średnia goli rywala.</div>':'';
 return `<div class="hc${hot?' hot':''}${o?' op':''}" data-k="${hk(r)}"><button class="hh"><div class="ht"><span class="hrk">${r.rank}.</span><span class="nm">${esc(r.team)}</span><span class="ga">(${r.ga_raw} goli)</span><span class="ar">▾</span></div>
+<div class="l5" title="Ost. 5 wyników (od najnowszego), na czerwono gole stracone">${r.games.map(g=>`<span>${g.gf}:<em>${g.ga}</em></span>`).join('')}</div>
 <div class="hm"><span>${esc([r.category,r.tournament].filter(Boolean).join(' · '))}</span></div><div class="hm"><span>vs ${esc(r.opponent||'')} (${r.side=='D'?'dom':'wyjazd'})</span><span class="chip">● ${r.minutes!=null?esc(r.minutes)+"'":'LIVE'} ${esc(r.score||'')}</span></div>
 <div class="tmp"><div class="tg"><i></i><b style="left:${t.temp}%"></b></div><span class="tv">${t.temp}</span><span class="tl">${esc(t.label)}${t.shots?'':'<br><span class="nd">bez strzałów</span>'}</span></div></button>
 <div class="hb"><div><div class="hi"><h4>Ostatnie 5 meczów <small class="nd">(celne/strzały rywala)</small></h4>${gm}${adjn}
@@ -209,7 +211,7 @@ const q=hq.trim().toLowerCase(),a=(W.list||[]).filter(r=>!q||(r.team||'').toLowe
 const keep=document.activeElement&&document.activeElement.id=='hq';
 el.innerHTML=`<div class="hx"><div class="hbar"><input id="hq" type="search" placeholder="Szukaj drużyny…" value="${esc(hq)}"><button id="hall">${a.length&&a.every(r=>HO[hk(r)])?'Zwiń wszystko':'Rozwiń wszystko'}</button></div>
 <div id="hl">${a.length?a.map(hcard).join(''):`<div class="empty">${(W.list||[]).length?'Brak drużyn dla „'+esc(hq)+'”':'Brak dziurawych obron w meczach LIVE (temperatura ≥ 40)'}</div>`}</div>
-<div class="hfoot">Na liście: <b>${c.listed}</b> · meczów LIVE: ${W.footer.live_matches} · drużyn: ${c.teams} · za mało danych: ${c.too_few} · poniżej 40: ${c.below}${c.no_shots?' · bez strzałów: '+c.no_shots:''}<br><b>${esc(W.note)}</b><details style="margin-top:6px;text-align:left"><summary>Jak liczymy temperaturę</summary>${esc(W.rule||'')}</details></div></div>`;
+<div class="hfoot">Na liście: <b>${c.listed}</b> · meczów LIVE: ${W.footer.live_matches} · drużyn: ${c.teams} · za mało danych: ${c.too_few} · nieaktualne (>${c.recent_days||90} dni): ${c.stale||0} · poniżej 40: ${c.below}${c.no_shots?' · bez strzałów: '+c.no_shots:''}<br><b>${esc(W.note)}</b><details style="margin-top:6px;text-align:left"><summary>Jak liczymy temperaturę</summary>${esc(W.rule||'')}</details></div></div>`;
 const i=$('#hq');i.oninput=()=>{hq=i.value;drawWorst()};if(keep){i.focus();i.setSelectionRange(i.value.length,i.value.length)}
 $('#hall').onclick=()=>{const all=a.every(r=>HO[hk(r)]);a.forEach(r=>HO[hk(r)]=!all);drawWorst()};
 el.querySelectorAll('.hc .hh').forEach(b=>b.onclick=()=>{const c=b.parentNode,k=c.dataset.k;HO[k]=!HO[k];c.classList.toggle('op',HO[k]);$('#hall').textContent=a.length&&a.every(r=>HO[hk(r)])?'Zwiń wszystko':'Rozwiń wszystko'});status(W)}

@@ -941,10 +941,21 @@ LEAGUE_AVG = 1.35      # fallback: typowa średnia goli drużyny na mecz
 GA_CAP = 4             # cap goli straconych w meczu
 TIER_W = 0.5           # waga meczu z rywalem z innej ligi
 TEMP_MIN = 40
+RECENT_DAYS = 90       # mecz liczy się tylko, gdy nie starszy niż 90 dni (uts)
+
+def is_recent(uts, now_ts=None, days=RECENT_DAYS):
+    if not uts: return False
+    now_ts = time.time() if now_ts is None else now_ts
+    try: return now_ts - float(uts) <= days * 86400
+    except (TypeError, ValueError): return False
+
+def all_recent(games, now_ts=None, days=RECENT_DAYS):
+    return bool(games) and all(is_recent(g.get("uts"), now_ts, days) for g in games)
 WORST_RULE = ("Dla każdego z 5 meczów: gole stracone obcinamy do 4 (cap), a potem odejmujemy średnią goli strzelanych przez tego rywala "
               "w jego ost. 5 meczach (bez meczu z tą drużyną): nadwyżka = max(0, min(stracone,4) − śr. rywala). Gdy brak danych o rywalu: "
               "nadwyżka = max(0, min(stracone,4) − 1,35 [średnia ligowa]). Mecz ma wagę ×0,5, gdy główna liga rywala (najczęstsza rozgrywka "
               "w jego ost. 15 meczach) różni się od głównej ligi drużyny (np. puchar z zespołem z wyższej ligi, puchary europejskie). "
+              "Liczą się tylko drużyny, których wszystkie 5 meczów odbyło się w ost. 90 dni (inaczej: nieaktualne dane); średnia rywala tylko z jego meczów z ost. 90 dni (min. 3). "
               "Temperatura = 100 × [40% · min(1, śr. ważona nadwyżki / 2) + 30% · min(1, śr. celnych rywali / 7) + "
               "20% · udział meczów ze straconym golem + 10% · min(1, śr. strzałów rywali / 18)]; bez strzałów: (40%·G + 20%·C) / 60%.")
 
@@ -964,12 +975,12 @@ def primary_league(d):
         if k is not None: c[k] = c.get(k, 0) + 1
     return max(c, key=lambda k: (c[k], str(k))) if c else None
 
-def opp_attack(uid, exclude_mid):
-    """Średnia goli strzelanych przez rywala w jego ost. 5 (bez wskazanego meczu) + jego główna liga."""
+def opp_attack(uid, exclude_mid, now_ts=None):
+    """Średnia goli strzelanych przez rywala w jego ost. 5 (bez wskazanego meczu, tylko mecze z ost. 90 dni; min. 3) + jego główna liga."""
     if not uid: return None
     d = lastx_raw(uid)
     if not d: return None
-    ms = [x for x in _done(d) if str(x.get("_id")) != str(exclude_mid)]
+    ms = [x for x in _done(d) if str(x.get("_id")) != str(exclude_mid) and is_recent((x.get("time") or {}).get("uts"), now_ts)]
     ms.sort(key=lambda x: (x.get("time") or {}).get("uts") or 0, reverse=True)
     gf = []
     for x in ms[:5]:
@@ -1070,8 +1081,9 @@ def holes_event(ev, opp_cache):
         games = (tg or {}).get("games") or []
         row = {"team": mi[side]["name"] or ev.get(side), "opponent": mi[opp]["name"] or ev.get(opp), "side": "D" if side == "home" else "W",
                "uid": uid, "tournament": mi.get("tournament") or ev.get("league"), "category": mi.get("category") or ev.get("country"),
-               "minutes": ev.get("minutes"), "score": ev.get("score"), "eventId": ev["eventId"], "games_n": len(games), "t": None}
-        if len(games) >= 5 and all(g["ga"] is not None and g["gf"] is not None for g in games):
+               "minutes": ev.get("minutes"), "score": ev.get("score"), "eventId": ev["eventId"], "games_n": len(games), "t": None,
+               "stale": len(games) >= 5 and not all_recent(games[:5])}
+        if len(games) >= 5 and not row["stale"] and all(g["ga"] is not None and g["gf"] is not None for g in games):
             infos = []
             for g in games:
                 k = (g["opp_uid"], g["mid"])
@@ -1111,7 +1123,8 @@ def holes(progress=None):
     lst = holes_rank(full)
     now = datetime.now(timezone.utc)
     return {"generated_warsaw": to_warsaw(now).strftime("%Y-%m-%d %H:%M:%S"), "list": lst,
-            "counts": {"teams": len(rows), "listed": len(lst), "too_few": len(rows) - len(full), "below": len(full) - len(lst),
+            "counts": {"teams": len(rows), "listed": len(lst), "too_few": sum(1 for r in rows if not r.get("t") and not r.get("stale")),
+                       "stale": sum(1 for r in rows if r.get("stale")), "recent_days": RECENT_DAYS, "below": len(full) - len(lst),
                        "no_shots": sum(1 for r in lst if not r["t"]["shots"])},
             "footer": {"live_matches": len(evs), "without_betradar": sum(1 for k, _ in res if k == "nobr"),
                        "without_stats": sum(1 for k, _ in res if k == "nostats")},

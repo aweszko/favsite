@@ -336,3 +336,48 @@ class TestWorst(unittest.TestCase):
         w = app.build_worst(rows, "live")
         self.assertEqual([r["team"] for r in w["conceding"]], ["A"])
         self.assertEqual(len(app.build_worst(rows, "all")["conceding"]), 2)
+
+class TestRecency(unittest.TestCase):
+    NOW = 1_800_000_000
+    def gm(self, days, gf=1, ga=2, mid=None):
+        return {"mid": mid or days, "uts": self.NOW - days * 86400, "date": "x", "opp": "O", "opp_uid": 9, "ha": "D", "comp": None,
+                "league": 1, "score": "%d:%d" % (gf, ga), "gf": gf, "ga": ga, "on_a": None, "tot_a": None}
+    def test_is_recent(self):
+        self.assertTrue(app.is_recent(self.NOW - 89 * 86400, self.NOW))
+        self.assertTrue(app.is_recent(self.NOW - 90 * 86400, self.NOW))
+        self.assertFalse(app.is_recent(self.NOW - 91 * 86400, self.NOW))
+        self.assertFalse(app.is_recent(None, self.NOW))
+    def test_all_recent_requires_every_game(self):
+        self.assertTrue(app.all_recent([self.gm(d) for d in (1, 5, 10, 20, 80)], self.NOW))
+        self.assertFalse(app.all_recent([self.gm(d) for d in (1, 5, 10, 20, 730)], self.NOW))
+        self.assertFalse(app.all_recent([], self.NOW))
+    def _raw(self, days_list):
+        ms = [{"_id": i, "time": {"uts": self.NOW - d * 86400}, "result": {"home": 2, "away": 0},
+               "teams": {"home": {"uid": 7}, "away": {"uid": 8}}, "_tid": 1} for i, d in enumerate(days_list)]
+        return {"matches": ms}
+    def test_opp_attack_ignores_old(self):
+        orig = app.lastx_raw
+        try:
+            app.lastx_raw = lambda uid: self._raw([1, 2, 400, 500, 600])
+            self.assertIsNone(app.opp_attack(7, -1, self.NOW))       # tylko 2 aktualne < 3
+            app.lastx_raw = lambda uid: self._raw([1, 2, 3, 500, 600])
+            r = app.opp_attack(7, -1, self.NOW)
+            self.assertEqual(r["n"], 3); self.assertEqual(r["avg"], 2.0)
+        finally:
+            app.lastx_raw = orig
+    def test_holes_event_marks_stale(self):
+        o = (app.match_info, app.live_details, app.team_games, app.opp_attack)
+        try:
+            app.match_info = lambda br: {"home": {"uid": 1, "name": "H"}, "away": {"uid": 2, "name": "A"}, "tournament": "T", "category": "C"}
+            app.live_details = lambda br: None
+            now = app.time.time()
+            fresh = [dict(self.gm(d), uts=now - d * 86400) for d in (1, 2, 3, 4, 5)]
+            old = fresh[:4] + [dict(self.gm(0), uts=now - 730 * 86400)]
+            app.team_games = lambda uid, br: {"games": fresh if uid == 1 else old, "league": 1}
+            app.opp_attack = lambda uid, mid, now_ts=None: None
+            _, rows = app.holes_event({"br": 5, "eventId": 1}, {})
+            h, a = rows
+            self.assertFalse(h["stale"]); self.assertIsNotNone(h["t"])
+            self.assertTrue(a["stale"]); self.assertIsNone(a["t"])
+        finally:
+            app.match_info, app.live_details, app.team_games, app.opp_attack = o
