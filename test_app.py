@@ -451,3 +451,35 @@ class TestSharedRecency(unittest.TestCase):
         self.assertEqual([(r["eventId"], r["minutes"], r["score"], r["rank"]) for r in out["list"]], [(1, "67", "3:0", 1), (3, "21", "1:0", 2)])
         self.assertIn("live_warsaw", out); self.assertEqual(res["list"][0]["minutes"], "56")
         self.assertEqual(len(app.worst_overlay(res, [])["list"]), 3)   # brak listy LIVE -> bez zmian
+
+
+class TestSections(unittest.TestCase):
+    def r(self, team, ev, ch, minutes="60", oc=None, temp=70):
+        return {"team": team, "eventId": ev, "chance": {"score": ch}, "minutes": minutes, "opp_chance": oc, "t": {"temp": temp}, "ga_raw": 10}
+
+    def test_balanced_both_listed_go_bottom(self):
+        lst = [self.r("City", 1, 90, "8", 85), self.r("Leipzig", 1, 85, "8", 90), self.r("A", 2, 70, "60", 30), self.r("B", 3, 50, "40", 20)]
+        out = app.holes_sections(lst)
+        self.assertEqual([x["team"] for x in out], ["A", "B", "City", "Leipzig"])
+        self.assertTrue(out[2]["balanced"] and out[3]["balanced"]); self.assertEqual(out[2]["section"], "balanced")
+        self.assertEqual([x["rank"] for x in out], [1, 2, 3, 4])
+
+    def test_balanced_close_chance(self):
+        out = app.holes_sections([self.r("A", 1, 60, "50", 55), self.r("B", 2, 40, "50", 10)])
+        self.assertEqual(out[0]["team"], "B"); self.assertTrue(out[1]["balanced"]); self.assertIn("różnica", out[1]["balanced_why"])
+
+    def test_early_below_main_above_balanced(self):
+        lst = [self.r("E", 1, 95, "12"), self.r("M", 2, 50, "30"), self.r("X", 3, 99, "70", 95)]
+        out = app.holes_sections(lst)
+        self.assertEqual([x["section"] for x in out], ["main", "early", "balanced"])
+        self.assertTrue(out[1]["early"]); self.assertFalse(out[0]["early"])
+        c = app.section_counts(out); self.assertEqual(c["teams"], {"main": 1, "early": 1, "balanced": 1})
+
+    def test_minute_int(self):
+        self.assertEqual(app.minute_int("45+2"), 45); self.assertEqual(app.minute_int("24'"), 24); self.assertIsNone(app.minute_int(None))
+        self.assertEqual(app.minute_int("HT"), 45)
+
+    def test_overlay_reclassifies_early(self):
+        res = {"list": [self.r("E", 1, 95, "20"), self.r("M", 2, 50, "60")]}
+        out = app.worst_overlay(res, [{"eventId": 1, "minutes": "26", "score": "0:0"}, {"eventId": 2, "minutes": "61", "score": "1:0"}])
+        self.assertEqual([x["team"] for x in out["list"]], ["E", "M"]); self.assertEqual(out["sections"]["teams"]["main"], 2)

@@ -1171,6 +1171,49 @@ def holes_rank(rows):
     for i, r in enumerate(ok, 1): r["rank"] = i
     return ok
 
+EARLY_MIN = 25
+BAL_DIFF = 10
+SECTIONS = ("main", "early", "balanced")
+
+def minute_int(m):
+    """'67' / '45+2' / "67'" -> int; przerwa = 45; nieznane -> None."""
+    if m is None: return None
+    s = str(m).strip().lower()
+    if s in ("ht", "przerwa", "half time", "halftime"): return 45
+    d = ""
+    for ch in s:
+        if ch.isdigit(): d += ch
+        elif d: break
+    return int(d) if d else None
+
+def holes_sections(lst):
+    """Sekcje: main (wyraźny kierunek, ≥25'), early (<25'), balanced (obie drużyny meczu na liście
+    lub szanse obu kierunków różnią się < 10 pkt). Wewnątrz sekcji sortowanie jak dotąd; rank od nowa."""
+    ev = {}
+    for r in lst: ev.setdefault(r.get("eventId"), []).append(r)
+    for r in lst:
+        both = len(ev[r.get("eventId")]) > 1
+        me = (r.get("chance") or {}).get("score") or 0
+        oc = r.get("opp_chance")
+        close = oc is not None and abs(me - oc) < BAL_DIFF
+        r["balanced"] = both or close
+        r["balanced_why"] = (("obie drużyny tego meczu są na liście dziurawych obron" if both else
+                              "szansa na gola w drugą stronę jest podobna (%d vs %d, różnica < %d pkt)" % (me, oc, BAL_DIFF))
+                             if r["balanced"] else None)
+        mi = minute_int(r.get("minutes"))
+        r["early"] = mi is not None and mi < EARLY_MIN
+        r["section"] = "balanced" if r["balanced"] else "early" if r["early"] else "main"
+    lst.sort(key=lambda r: (SECTIONS.index(r["section"]), -((r.get("chance") or {}).get("score") or 0),
+                            -((r.get("t") or {}).get("temp") or 0), -(r.get("ga_raw") or 0), r.get("team") or ""))
+    for i, r in enumerate(lst, 1): r["rank"] = i
+    return lst
+
+def section_counts(lst):
+    c = {k: 0 for k in SECTIONS}
+    for r in lst: c[r.get("section", "main")] += 1
+    ev = {k: len({r.get("eventId") for r in lst if r.get("section") == k}) for k in SECTIONS}
+    return {"teams": c, "matches": ev}
+
 def holes_event(ev, opp_cache):
     if not ev.get("br"): return ("nobr", [])
     mi = match_info(ev["br"])
@@ -1230,8 +1273,11 @@ def holes(progress=None):
         o = [x for x in by_ev[r["eventId"]] if x is not r]
         r["opp_att"] = opp_attack_summary(o[0]["_g"]) if o else None
         r["chance"] = goal_chance(r.get("t"), r["opp_att"], r.get("live"), r.get("minutes"))
+    for r in rows:
+        o = [x for x in by_ev[r["eventId"]] if x is not r]
+        r["opp_chance"] = (o[0].get("chance") or {}).get("score") if o and o[0].get("t") else None
     full = [r for r in rows if r.get("t")]
-    lst = holes_rank(full)
+    lst = holes_sections(holes_rank(full))
     def prof(r):
         try:
             pg = [conceded_minutes(cached("tlf:%s" % g["mid"], TL_DONE_TTL, lambda m=g["mid"]: gismo("match_timeline/%s" % m)), g["ha"])
@@ -1243,7 +1289,7 @@ def holes(progress=None):
         list(ex.map(prof, lst[:TL_MAX_TEAMS]))
     for r in rows: r.pop("_g", None)
     now = datetime.now(timezone.utc)
-    return {"generated_warsaw": to_warsaw(now).strftime("%Y-%m-%d %H:%M:%S"), "list": lst,
+    return {"generated_warsaw": to_warsaw(now).strftime("%Y-%m-%d %H:%M:%S"), "list": lst, "sections": section_counts(lst),
             "counts": {"teams": len(rows), "listed": len(lst), "too_few": sum(1 for r in rows if not r.get("t") and not r.get("stale")),
                        "stale": sum(1 for r in rows if r.get("stale")), "recent_days": RECENT_DAYS, "below": len(full) - len(lst),
                        "no_shots": sum(1 for r in lst if not r["t"]["shots"])},
@@ -1280,8 +1326,8 @@ def worst_overlay(res, live_evs, now_utc=None):
             e = cur.get(r.get("eventId"))
             if e is None: continue
             r = dict(r); r["minutes"], r["score"] = e.get("minutes"), e.get("score"); lst.append(r)
-        for i, r in enumerate(lst): r["rank"] = i + 1
-        out["list"] = lst
+        lst = holes_sections(lst)
+        out["list"] = lst; out["sections"] = section_counts(lst)
         out["live_warsaw"] = to_warsaw(now_utc).strftime("%Y-%m-%d %H:%M:%S")
     return out
 
