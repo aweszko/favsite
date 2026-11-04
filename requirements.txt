@@ -1,0 +1,1 @@
+# Brak zależności zewnętrznych – aplikacja używa tylko biblioteki standardowej Pythona 3.9+.

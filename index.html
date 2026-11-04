@@ -1,0 +1,111 @@
+<!doctype html><html lang="pl"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#0a0a0a"><title>Favsite – mecze i faworyci</title>
+<style>
+:root{--b:#7a0c1f;--b2:#8b1428;--bg:#0a0a0a;--c:#141414;--l:#262626;--t:#ececec;--s:#9a9a9a}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--t);font:15px/1.4 system-ui,-apple-system,Segoe UI,Roboto,sans-serif}
+header{position:sticky;top:0;z-index:5;background:#000;border-bottom:2px solid var(--b)}
+.top{display:flex;align-items:center;justify-content:space-between;padding:10px 12px 6px}
+h1{font-size:18px;margin:0}h1 span{color:var(--b2)}
+.main{display:flex;gap:6px;padding:0 12px 8px}
+.main button{flex:1;padding:10px;border-radius:10px;border:1px solid var(--l);background:var(--c);color:var(--t);font-weight:600;font-size:15px}
+.main button.on{background:var(--b);border-color:var(--b2)}
+.tabs{display:flex;gap:6px;overflow-x:auto;padding:0 12px 10px;scrollbar-width:none}.tabs::-webkit-scrollbar{display:none}
+.tabs button{flex:0 0 auto;padding:8px 13px;border-radius:18px;border:1px solid var(--l);background:var(--c);color:var(--t);font-size:14px;white-space:nowrap}
+.tabs button.on{background:var(--b2);border-color:var(--b2)}.tabs .cnt{color:#d9a0aa;font-size:12px;margin-left:4px}
+.tabs button.on .cnt{color:#fff}
+#st{font-size:12px;color:var(--s);padding:6px 12px}.err{color:#ff9a6a}
+input{background:var(--c);color:var(--t);border:1px solid var(--l);border-radius:8px;padding:8px;font-size:15px;width:100%}
+.lg{margin:8px 8px 0;background:var(--c);border-radius:12px;overflow:hidden;border:1px solid var(--l)}
+.lh{background:linear-gradient(90deg,var(--b),#1a1a1a);padding:8px 12px;font-weight:600;font-size:14px;display:flex;justify-content:space-between}
+.lh small{color:#e7c3c9;font-weight:400}
+.m{display:grid;grid-template-columns:54px 1fr;gap:4px 8px;padding:9px 12px;border-top:1px solid var(--l)}
+.m:first-of-type{border-top:0}.tm{color:var(--s);font-size:13px;padding-top:2px}.tm .live{color:#ff4d6a;font-weight:700}
+.tn div{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.sc{float:right;color:#ff4d6a;font-weight:700}
+.od{grid-column:2;display:grid;grid-template-columns:repeat(3,1fr);gap:6px}
+.od span{background:#1d1d1d;border:1px solid #333;border-radius:8px;text-align:center;padding:5px 0;font-weight:600}
+.od span i{font-style:normal;color:var(--s);font-weight:400;font-size:12px;margin-right:6px}
+.od span.min{border-color:var(--b2);background:#2a0a12}
+.f{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;padding:0 12px 10px}.f label{font-size:12px;color:var(--s)}
+.card{margin:10px 8px;background:var(--c);border:1px solid var(--l);border-radius:14px;overflow:hidden}
+.ch{padding:9px 12px;background:#000;border-bottom:1px solid var(--b);font-size:13px;color:var(--s);display:flex;justify-content:space-between;gap:8px}
+.ch b{color:#fff}.rk{background:var(--b);color:#fff;border-radius:8px;padding:1px 8px;font-weight:700}
+.vs{display:grid;grid-template-columns:1fr 64px 1fr;align-items:stretch}
+.vs .c{padding:8px 10px}.vs .fav{background:#1f070c}.vs .mid{background:#0d0d0d;color:var(--s);font-size:11px;text-align:center;display:flex;flex-direction:column;justify-content:space-around;padding:6px 2px}
+.nm{font-weight:700;font-size:15px;min-height:38px}.tag{font-size:11px;color:#e7a0ad}.vs .riv .tag{color:var(--s)}
+.vs .riv{text-align:right}
+.v{font-size:17px;font-weight:700;padding:3px 0}.nd{color:#777;font-weight:400;font-size:13px}
+.d{font-size:12px;font-weight:600}.pos{color:#5fd38a}.neg{color:#ff6b6b}
+.g{font-size:12px;color:#ccc;border-top:1px solid var(--l)}.g table{width:100%;border-collapse:collapse}
+.g td{padding:3px 6px;border-bottom:1px solid #1c1c1c;white-space:nowrap}.g td.r{text-align:right}
+.tg{display:block;width:100%;background:#111;color:#e7a0ad;border:0;border-top:1px solid var(--l);padding:9px;font-size:13px}
+.two{display:grid;grid-template-columns:1fr 1fr}.two>div{overflow:hidden}.two>div+div{border-left:1px solid var(--l)}
+.two h4{margin:0;padding:5px 6px;font-size:12px;color:#fff;background:#1a1a1a}
+.empty{padding:30px 16px;text-align:center;color:var(--s)}footer{padding:14px 12px 30px;color:var(--s);font-size:12px}
+@media(min-width:900px){#list,#rank{max-width:900px;margin:0 auto}.main,.tabs,.f{max-width:900px;margin-left:auto;margin-right:auto}}
+</style></head><body>
+<header><div class="top"><h1>⚽ Fav<span>site</span></h1><span id="clk" class="tm"></span></div>
+<div class="main"><button data-v="list" class="on">Mecze</button><button data-v="rank">Faworyci – ranking</button></div>
+<div class="tabs" id="tabs"></div></header>
+<div id="st">Ładowanie…</div>
+<div id="list"></div>
+<div id="rank" hidden>
+<div class="f"><label>min. meczów<input id="mg" type="number" min="0" max="5" value="3"></label>
+<label>kurs od<input id="omin" type="number" step="0.05" value="1.20" inputmode="decimal"></label>
+<label>kurs do<input id="omax" type="number" step="0.05" value="2.00" inputmode="decimal"></label></div>
+<div id="rk"></div></div>
+<footer>Źródła: Superbet PL (oferta, kursy 1X2), Sportradar (statystyki strzałów). Godziny: Europe/Warsaw. Brak danych = „brak danych”, nic nie jest szacowane.</footer>
+<script>
+const $=s=>document.querySelector(s);let view='list',tab='live',rmode='all',M=null,R=null,open={};
+const DN=['niedz.','pon.','wt.','śr.','czw.','pt.','sob.'];
+const esc=s=>String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const f=(x,d=2)=>x==null?'–':Number(x).toFixed(d).replace('.',',');
+function addDay(s,n){const d=new Date(s+'T12:00:00Z');d.setUTCDate(d.getUTCDate()+n);return d.toISOString().slice(0,10)}
+function listTabs(){if(!M)return[];const t=M.today_warsaw,now=M.now_ts,L=M.matches,pre=L.filter(m=>m.mode!='live');
+const T=[['live','Live',L.filter(m=>m.mode=='live')],['h1','Za 1 godz.',pre.filter(m=>m.ts-now<=36e5)],['h3','Za 3 godz.',pre.filter(m=>m.ts-now<=108e5)],['d0','Dziś',pre.filter(m=>m.day_warsaw==t)],['d1','Jutro',pre.filter(m=>m.day_warsaw==addDay(t,1))]];
+for(let i=2;i<7;i++){const d=addDay(t,i),dd=new Date(d+'T12:00:00Z');T.push(['d'+i,DN[dd.getUTCDay()]+' '+d.slice(8)+'.'+d.slice(5,7),pre.filter(m=>m.day_warsaw==d)])}return T}
+function drawTabs(){const el=$('#tabs');if(view=='list'){el.innerHTML=listTabs().map(([k,n,a])=>`<button data-t="${k}" class="${k==tab?'on':''}">${n}<span class="cnt">${a.length}</span></button>`).join('')}
+else el.innerHTML=[['live','Live'],['prematch','Przedmeczowe (dziś)'],['all','Wszystkie']].map(([k,n])=>`<button data-r="${k}" class="${k==rmode?'on':''}">${n}</button>`).join('');
+el.querySelectorAll('[data-t]').forEach(b=>b.onclick=()=>{tab=b.dataset.t;drawTabs();drawList();scrollTo(0,0)});
+el.querySelectorAll('[data-r]').forEach(b=>b.onclick=()=>{rmode=b.dataset.r;drawTabs();loadRank()})}
+function odds(m){const a=[m.o1,m.ox,m.o2],mn=Math.min(...a.filter(x=>x!=null));if(a.every(x=>x==null))return'<div class="od"><span class="nd" style="grid-column:1/4">brak kursów</span></div>';
+return '<div class="od">'+['1','X','2'].map((l,i)=>`<span class="${a[i]===mn?'min':''}"><i>${l}</i>${f(a[i])}</span>`).join('')+'</div>'}
+function drawList(){if(!M)return;const T=listTabs().find(x=>x[0]==tab)||listTabs()[0],arr=T[2];const g={};
+arr.forEach(m=>{const k=(m.league||'Inne rozgrywki');(g[k]=g[k]||{o:m.lorder||0,c:m.country,a:[]}).a.push(m)});
+const ks=Object.keys(g).sort((a,b)=>g[a].o-g[b].o||a.localeCompare(b,'pl'));
+$('#list').innerHTML=ks.length?ks.map(k=>`<div class="lg"><div class="lh"><span>${esc(k)}</span><small>${g[k].a.length}</small></div>`+g[k].a.sort((a,b)=>a.ts-b.ts).map(m=>`<div class="m"><div class="tm">${m.mode=='live'?`<span class="live">● ${m.minutes!=null?esc(m.minutes)+"'":'LIVE'}</span>`:m.start_warsaw+(tab.startsWith('h')&&m.day_warsaw!=M.today_warsaw?'<br>jutro':'')}</div>
+<div class="tn">${m.score?`<span class="sc">${esc(m.score)}</span>`:''}<div>${esc(m.home)}</div><div>${esc(m.away)}</div></div>${odds(m)}</div>`).join('')+'</div>').join(''):'<div class="empty">Brak meczów w tej zakładce.</div>'}
+function stat(v,d=2,suf=''){return v==null?'<span class="nd">brak danych</span>':f(v,d)+suf}
+function dif(v,suf=''){if(v==null)return'<span class="nd">–</span>';return `<span class="d ${v>0?'pos':v<0?'neg':''}">${v>0?'+':''}${f(v,v%1?2:0)}${suf}</span>`}
+function games(gs){if(gs==null)return'<div class="empty" style="padding:8px">brak danych</div>';if(!gs.length)return'<div style="padding:6px" class="nd">brak meczów</div>';
+return '<table>'+gs.map(g=>`<tr><td>${esc((g.date||'').slice(0,5))} ${g.ha}</td><td style="max-width:70px;overflow:hidden;text-overflow:ellipsis">${esc(g.opp)}</td><td>${esc(g.score)}</td><td class="r">${g.on==null&&g.tot==null?'<span class="nd">b.d.</span>':(g.on??'–')+'/'+(g.tot??'–')}</td></tr>`).join('')+'</table>'}
+function card(r,few){const a=r.stats,b=r.opp_stats,d=r.diff||{},id=r.eventId,ga=a.games_with_data+'/'+a.games_total,gb=b?b.games_with_data+'/'+b.games_total:'–';
+const line=(lab,x,y,dd,dg=2,suf='')=>`<div class="c fav"><div class="v">${stat(x,dg,suf)}</div></div><div class="mid">${lab}<br>${dd}</div><div class="c riv"><div class="v">${stat(y,dg,suf)}</div></div>`;
+const when=r.mode=='live'?`<span style="color:#ff4d6a">● ${r.minutes!=null?esc(r.minutes)+"'":'LIVE'} ${esc(r.score||'')}</span>`:esc(r.start_warsaw);
+return `<div class="card"><div class="ch"><span>${few?'':`<span class="rk">#${r.rank}</span> `}${esc([r.category,r.tournament].filter(Boolean).join(' · '))}</span><b>${when}</b></div>
+<div class="vs"><div class="c fav"><div class="tag">FAWORYT (${r.side=='D'?'gospodarz':'gość'})</div><div class="nm">${esc(r.team)}</div></div><div class="mid">vs</div><div class="c riv"><div class="tag">RYWAL</div><div class="nm">${esc(r.opponent)}</div></div>
+${line('kurs',r.odds_fav,r.odds_other,'X '+f(r.odds_draw))}
+${line('celne<br>śr./mecz',a.avg_on,b&&b.avg_on,dif(d.avg_on))}
+${line('ogółem<br>śr./mecz',a.avg_tot,b&&b.avg_tot,dif(d.avg_tot))}
+${line('celne Σ',a.games_with_data?a.sum_on:null,b&&b.games_with_data?b.sum_on:null,dif(d.sum_on),0)}
+${line('ogółem Σ',a.games_with_data?a.sum_tot:null,b&&b.games_with_data?b.sum_tot:null,dif(d.sum_tot),0)}
+${line('celność',a.accuracy,b&&b.accuracy,dif(d.accuracy,'%'),1,'%')}
+${line('mecze z danymi',null,null,'',0).replace(/<span class="nd">brak danych<\/span>/,ga).replace(/<span class="nd">brak danych<\/span>/,gb)}</div>
+<button class="tg" onclick="open[${id}]=!open[${id}];drawRank()">${open[id]?'▲ ukryj':'▼ ostatnie 5 meczów obu drużyn'} (celne/ogółem)</button>
+${open[id]?`<div class="g two"><div><h4>${esc(r.team)}</h4>${games(r.games)}</div><div><h4>${esc(r.opponent)}</h4>${games(r.opp_games)}</div></div>`:''}</div>`}
+function drawRank(){if(!R)return;if(R.error){$('#rk').innerHTML='<div class="empty err">Błąd: '+esc(R.error)+'</div>';return}
+$('#rk').innerHTML=(R.ranking.length?R.ranking.map(r=>card(r)).join(''):'<div class="empty">Brak faworytów spełniających kryteria.</div>')+
+(R.too_few.length?'<h3 style="margin:16px 12px 0;font-size:14px;color:#e7a0ad">Za mało danych ('+R.too_few.length+')</h3>'+R.too_few.map(r=>card(r,1)).join(''):'')+
+`<div class="empty" style="padding:10px">Meczów: ${R.footer.matches} · faworytów bez statystyk: ${R.footer.without_stats} · bez betradarId: ${R.footer.without_betradar}</div>`;status(R)}
+function status(d){const e=Object.entries(d.errors||{});$('#st').innerHTML=`Aktualizacja: ${d.generated_warsaw} (Warszawa)`+(e.length?`<div class="err">Błąd źródła (pokazuję ostatni cache): ${esc(e.map(x=>x.join(': ')).join('; '))}</div>`:'')}
+async function loadList(){try{const t=performance.now();M=await (await fetch('/api/matches')).json();if(M.error)throw M.error;drawTabs();drawList();status(M);$('#st').innerHTML+=` · ${M.matches.length} meczów · ${Math.round(performance.now()-t)} ms`}catch(e){$('#st').innerHTML='<span class="err">Błąd ładowania: '+esc(e)+'</span>'}}
+async function loadRank(){$('#st').textContent='Ładowanie rankingu… (pierwsze pobranie statystyk może potrwać 1–3 min)';
+const q=new URLSearchParams({mode:rmode,min_games:$('#mg').value,odds_min:$('#omin').value.replace(',','.'),odds_max:$('#omax').value.replace(',','.')});
+try{R=await (await fetch('/api/ranking?'+q)).json();drawRank()}catch(e){$('#st').innerHTML='<span class="err">Błąd: '+esc(e)+'</span>'}}
+document.querySelectorAll('[data-v]').forEach(b=>b.onclick=()=>{view=b.dataset.v;document.querySelectorAll('[data-v]').forEach(x=>x.classList.toggle('on',x==b));
+$('#list').hidden=view!='list';$('#rank').hidden=view!='rank';drawTabs();if(view=='rank'){R?drawRank():loadRank()}else if(M)status(M)});
+['#mg','#omin','#omax'].forEach(s=>$(s).onchange=loadRank);
+setInterval(()=>{$('#clk').textContent=new Date().toLocaleTimeString('pl-PL',{timeZone:'Europe/Warsaw',hour:'2-digit',minute:'2-digit'})},1000);
+if(location.hash=='#ranking')document.querySelector('[data-v=rank]').click();
+loadList();setInterval(()=>view=='list'?loadList():loadRank(),60000);
+</script></body></html>
