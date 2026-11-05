@@ -223,7 +223,7 @@ class TGist(unittest.TestCase):
         self.http = app._gist_http; self.path = app.PRO_LOG_PATH
         self.tmp = tempfile.mkdtemp(); app.PRO_LOG_PATH = os.path.join(self.tmp, "l.json")
         self.calls = []
-        app.GIST_STATE.update({"last": 0.0, "dirty": False, "timer": None, "ok": None, "err": None})
+        app.GIST_STATE.update({"last": 0.0, "dirty": False, "timer": None, "ok": None, "err": None, "disabled": False})
     def tearDown(self):
         import os
         for k, v in self.env.items():
@@ -269,8 +269,53 @@ class TGist(unittest.TestCase):
         self.assertFalse(app.GIST_STATE["dirty"]); self.assertTrue(app.GIST_STATE["ok"])
     def test_push_failure_safe(self):
         self.on(); self.fake(exc=RuntimeError("boom"))
-        self.assertFalse(app.gist_push_now()); self.assertIn("gist", app.ERRORS)
-        self.assertNotIn("x-test", str(app.ERRORS))
+        self.assertFalse(app.gist_push_now()); self.assertNotIn("gist", app.ERRORS)   # po cichu
+        self.assertNotIn("x-test", str(app.ERRORS)); self.assertFalse(app.GIST_STATE["ok"])
+    def test_401_disables_silently(self):
+        import urllib.error, json
+        self.on(); self.fake(exc=urllib.error.HTTPError("u", 401, "Unauthorized", {}, None))
+        self.assertIsNone(app.gist_load()); self.assertNotIn("gist", app.ERRORS)
+        self.assertFalse(app.persist_active()); n = len(self.calls)
+        app.pro_save([{"eventId": 9}]); self.assertIsNone(app.GIST_STATE["timer"])   # bez kolejnych prób
+        self.assertFalse(app.gist_push_now()); self.assertEqual(len(self.calls), n)
+        self.assertEqual(json.load(open(app.PRO_LOG_PATH)), [{"eventId": 9}])       # lokalny cache działa
+        self.assertNotIn("x-test", json.dumps(app.status()))
+    def test_pro_note_not_claiming_gist_when_broken(self):
+        self.on(); self.fake(exc=RuntimeError("boom")); app.gist_push_now()
+        self.assertFalse(app.persist_working())
+        self.fake(); app.GIST_STATE["ok"] = True; self.assertTrue(app.persist_working())
+
+class TRefresh(unittest.TestCase):
+    def setUp(self):
+        self.orig = (app.ranking, app.holes, app.RESULTS.copy(), app.JOBS.copy(), dict(app.WORST_STATE))
+        app.RESULTS.clear(); app.JOBS.clear(); app.WORST_STATE.update(res=None, t=0, job=None)
+    def tearDown(self):
+        app.ranking, app.holes = self.orig[0], self.orig[1]
+        app.RESULTS.clear(); app.RESULTS.update(self.orig[2]); app.JOBS.clear(); app.JOBS.update(self.orig[3])
+        app.WORST_STATE.update(self.orig[4]); app.ERRORS.pop("ranking_job", None)
+    def _wait(self, cond):
+        import time
+        for _ in range(200):
+            if cond(): return True
+            time.sleep(0.02)
+        return False
+    def test_tick_recomputes_stale_without_requests(self):
+        import time
+        calls = []
+        app.ranking = lambda *a, **k: (calls.append(a), {"ranking": [], "too_few": [], "footer": {}})[1]
+        app.holes = lambda prog: {"generated_warsaw": "x", "list": []}
+        app.RESULTS[app._rkey("all", 3, 1.2, 2.0)] = (time.time() - 10000, {"ranking": [], "too_few": [], "footer": {}})
+        app.refresh_tick()
+        self.assertTrue(self._wait(lambda: time.time() - app.RESULTS[app._rkey("all", 3, 1.2, 2.0)][0] < 60))
+        self.assertTrue(self._wait(lambda: app.WORST_STATE["res"] is not None))
+        self.assertTrue(app.REFRESH_STATE["last"] > 0)
+    def test_hung_ranking_job_restarted(self):
+        import time
+        key = app._rkey("all", 3, 1.2, 2.0)
+        app.JOBS[key] = {"progress": {"done": 0, "total": 0}, "started": time.time() - app.RANK_JOB_MAX - 5}
+        app.ranking = lambda *a, **k: {"ranking": [], "too_few": [], "footer": {}}
+        app.get_ranking("all")
+        self.assertTrue(self._wait(lambda: key in app.RESULTS))
 
 
 class TestHoles(unittest.TestCase):

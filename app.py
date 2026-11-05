@@ -702,9 +702,13 @@ def gist_cfg():
     return (t, g) if t and g else None
 
 def persist_active():
-    return gist_cfg() is not None
+    """Gist aktywny tylko gdy skonfigurowany i nie odrzucił uwierzytelnienia (401/403/404 -> wyłączony do restartu)."""
+    return gist_cfg() is not None and not GIST_STATE.get("disabled")
 
-def _gist_http(method, gid, token, body=None, timeout=15):
+def persist_working():
+    return persist_active() and GIST_STATE["ok"] is not False
+
+def _gist_http(method, gid, token, body=None, timeout=8):
     """Warstwa HTTP (podmieniana w testach). Zwraca (status, dict)."""
     data = json.dumps(body).encode("utf-8") if body is not None else None
     rq = urllib.request.Request(GIST_API + gid, data=data, method=method,
@@ -717,19 +721,20 @@ def _gist_err(e):
     # nigdy nie zapisujemy tokenu - tylko typ błędu / kod HTTP
     msg = type(e).__name__ + (" %s" % e.code if hasattr(e, "code") else "")
     GIST_STATE["ok"], GIST_STATE["err"] = False, msg
-    ERRORS["gist"] = msg
+    if getattr(e, "code", None) in (401, 403, 404): GIST_STATE["disabled"] = True   # nieważny token - pomijamy po cichu
+    ERRORS.pop("gist", None)   # błąd gista nie jest błędem źródła danych - nie pokazujemy go użytkownikowi
     print("[gist] błąd: " + msg, file=sys.stderr)
 
 def gist_load():
     cfg = gist_cfg()
-    if not cfg: return None
+    if not cfg or not persist_active(): return None
     try:
         st, d = _gist_http("GET", cfg[1], cfg[0])
         f = (d.get("files") or {}).get(GIST_FILE) or {}
         content = f.get("content")
         if f.get("truncated") and f.get("raw_url"):
             rq = urllib.request.Request(f["raw_url"], headers={"Authorization": "Bearer " + cfg[0], "User-Agent": "triumfator"})
-            with urllib.request.urlopen(rq, timeout=15) as r: content = r.read().decode("utf-8")
+            with urllib.request.urlopen(rq, timeout=8) as r: content = r.read().decode("utf-8")
         log = json.loads(content or "[]")
         if not isinstance(log, list): raise ValueError("bad log")
         GIST_STATE["ok"] = True
@@ -739,7 +744,7 @@ def gist_load():
 
 def gist_push_now():
     cfg = gist_cfg()
-    if not cfg: return False
+    if not cfg or not persist_active(): return False
     with GIST_SLOCK:
         GIST_STATE["dirty"] = False; GIST_STATE["last"] = time.time(); GIST_STATE["timer"] = None
     try:
@@ -753,7 +758,7 @@ def gist_push_now():
 
 def gist_schedule():
     """Zapis do gista: co najwyżej raz na ~30 s, zmiany łączone."""
-    if not gist_cfg(): return
+    if not persist_active(): return
     with GIST_SLOCK:
         GIST_STATE["dirty"] = True
         if GIST_STATE["timer"] is not None: return
@@ -850,7 +855,7 @@ def pro(vip_res):
             "watch": watch, "watch_live": sum(1 for w in watch if w.get("live")), "types": types, "near": sorted(near, key=lambda x: x["missing"]),
             "message": None if types else "Brak typów w tej chwili",
             "record": record_stats(log), "log": list(reversed(log))[:40],
-            "notes": ["Typy to spełnione kryteria, nie gwarancja.", ("Rejestr jest zapisywany w prywatnym gistcie." if persist_active() else "Rejestr zeruje się po restarcie serwera.")],
+            "notes": ["Typy to spełnione kryteria, nie gwarancja.", ("Rejestr jest zapisywany w prywatnym gistcie." if persist_working() else "Rejestr zeruje się po restarcie serwera.")],
             "persistent": persist_active()}
 
 PRO_STATE = {"res": None, "t": 0, "job": False}
@@ -1362,11 +1367,27 @@ def _worker(key):
     try:
         res = ranking(key[0], key[1], key[2], key[3], progress=prog)
         res["compute_seconds"] = round(time.time() - t0, 1)
-        with LOCK: RESULTS[key] = (time.time(), res)
+        with LOCK: RESULTS[key] = (time.time(), res); ERRORS.pop("ranking", None); ERRORS.pop("ranking_job", None)
     except Exception as e:
         ERRORS["ranking"] = "%s: %s" % (type(e).__name__, e)
     finally:
-        with LOCK: JOBS.pop(key, None)
+        with LOCK:
+            if JOBS.get(key, {}).get("progress") is prog: JOBS.pop(key, None)
+
+RANK_JOB_MAX = 600
+REFRESH_EVERY = 60
+REFRESH_STATE = {"last": 0.0}
+
+def refresh_tick():
+    """Jedno przejście odświeżacza: uruchamia przeliczenie przeterminowanych rankingów (bez czekania)."""
+    for fn in (lambda: get_ranking("all"), lambda: get_ranking("all", 3, *VIP_RULES["odds_range"]), get_worst):
+        try: fn()
+        except Exception as e: print("[refresh] %s: %s" % (type(e).__name__, e), file=sys.stderr)
+    REFRESH_STATE["last"] = time.time()
+
+def _refresher():
+    while True:
+        refresh_tick(); time.sleep(REFRESH_EVERY)
 
 def get_ranking(mode="all", min_games=3, odds_min=1.2, odds_max=2.0):
     key = _rkey(mode, min_games, odds_min, odds_max)
@@ -1374,6 +1395,9 @@ def get_ranking(mode="all", min_games=3, odds_min=1.2, odds_max=2.0):
         r = RESULTS.get(key)
         fresh = r and time.time() - r[0] < TTL[mode]
         job = JOBS.get(key)
+        for k in [k for k, j in JOBS.items() if time.time() - j["started"] > RANK_JOB_MAX]:   # zawieszone liczenie nie blokuje
+            ERRORS["ranking_job"] = "liczenie > %d s – restart" % RANK_JOB_MAX; JOBS.pop(k, None)
+            if k == key: job = None
         if not fresh and not job:
             busy = [k for k in JOBS if k[0] == mode]          # jeden wątek na tryb
             if busy: job = JOBS[busy[0]]
@@ -1397,7 +1421,8 @@ def status():
                 "results": [{"key": list(k), "age_seconds": round(time.time() - v[0]), "compute_seconds": v[1].get("compute_seconds"),
                              "ranking": len(v[1]["ranking"]), "too_few": len(v[1]["too_few"]), "footer": v[1]["footer"]} for k, v in RESULTS.items()],
                 "cache_entries": len(CACHE), "threads": threading.active_count(),
-                "persistence": {"active": persist_active(), "ok": GIST_STATE["ok"], "error": GIST_STATE["err"]}}
+                "persistence": {"active": persist_active(), "ok": GIST_STATE["ok"], "error": GIST_STATE["err"]},
+                "refresher": {"last_seconds_ago": round(time.time() - REFRESH_STATE["last"]) if REFRESH_STATE["last"] else None}}
 
 # ---------- serwer ----------
 HTML = open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "index.html"), encoding="utf-8").read()
@@ -1465,6 +1490,7 @@ def main():
     srv = ThreadingHTTPServer(("0.0.0.0", port), H)
     print("Favsite działa: http://localhost:%d  (Ctrl+C = stop)" % port)
     threading.Thread(target=lambda: (matches(), get_ranking("all")), daemon=True).start()  # rozgrzanie cache
+    threading.Thread(target=_refresher, daemon=True).start()   # rankingi przeliczane w tle niezależnie od gista/zapytań
     if "--open" in sys.argv:
         threading.Timer(1.0, lambda: webbrowser.open("http://localhost:%d" % port)).start()
     try: srv.serve_forever()
