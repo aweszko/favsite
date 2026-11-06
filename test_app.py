@@ -585,7 +585,9 @@ class TestNextGoal(unittest.TestCase):
                       minutes="89", score="0:7",
                       live={"on": [0, 5], "cor": [0, 4], "da": [10, 40]})
         out = next_goal.build_next_goal([r])
-        self.assertEqual(out["picks"], [])
+        self.assertEqual(len(out["picks"]), 1)
+        self.assertTrue(out["picks"][0]["nearest_miss"])
+        self.assertTrue(any("prowadzi 2+" in x for x in out["picks"][0]["sieves_failed"]))
         # minuta 89' przechodzi sito ≥25; odpada na rywal_gd +7
         self.assertEqual(out["funnel"][1]["after"], 1)
         gd_step = next(f for f in out["funnel"] if "prowadzi 2+" in f["name"])
@@ -599,14 +601,20 @@ class TestNextGoal(unittest.TestCase):
         pr = next_goal.next_live_pressure(r["live"])
         self.assertIsNotNone(pr)
         self.assertLess(pr["share"], 0.40)
-        self.assertEqual(next_goal.build_next_goal([r])["picks"], [])
+        out = next_goal.build_next_goal([r])
+        self.assertEqual(len(out["picks"]), 1)
+        self.assertTrue(out["picks"][0]["nearest_miss"])
+        self.assertTrue(out["picks"][0]["sieves_failed"])
 
     def test_maccabi_petah_fifty_fifty_no_shots(self):
         r = self.base(team="Maccabi Petah Tikva", opponent="Maccabi Tel Aviv", side="W",
                       minutes="58", score="1:1",
                       live={"on": [2, 2], "cor": [3, 3], "da": [15, 15]},
                       t={"temp": 73, "shots": False}, opp_att={"gf_avg": 2.6})
-        self.assertEqual(next_goal.build_next_goal([r])["picks"], [])
+        out = next_goal.build_next_goal([r])
+        self.assertEqual(len(out["picks"]), 1)
+        self.assertTrue(out["picks"][0]["nearest_miss"])
+        self.assertTrue(out["picks"][0]["sieves_failed"])
 
     def test_zalau_rival_not_dominating(self):
         # side=W, score 1:2 → leaky (away) 2, rival (home) 1; leaky prowadzi 2:1
@@ -616,13 +624,19 @@ class TestNextGoal(unittest.TestCase):
                       t={"temp": 60, "shots": True}, opp_att={"gf_avg": 1.8})
         g = next_goal.leaky_rival_goals(r)
         self.assertEqual(g, (2, 1))
-        self.assertEqual(next_goal.build_next_goal([r])["picks"], [])
+        out = next_goal.build_next_goal([r])
+        self.assertEqual(len(out["picks"]), 1)
+        self.assertTrue(out["picks"][0]["nearest_miss"])
+        self.assertTrue(out["picks"][0]["sieves_failed"])
 
     def test_balanced_out(self):
         r = self.base(balanced=True, minutes="40",
                       live={"on": [0, 4], "cor": [0, 3], "da": [10, 50]},
                       opp_att={"gf_avg": 2.0})
-        self.assertEqual(next_goal.build_next_goal([r])["picks"], [])
+        out = next_goal.build_next_goal([r])
+        self.assertEqual(len(out["picks"]), 1)
+        self.assertTrue(out["picks"][0]["nearest_miss"])
+        self.assertIn("nie wyrównany", out["picks"][0]["sieves_failed"])
 
     def test_funnel_steps(self):
         out = next_goal.build_next_goal([self.base()])
@@ -632,7 +646,78 @@ class TestNextGoal(unittest.TestCase):
     def test_empty_list_ok(self):
         out = next_goal.build_next_goal([])
         self.assertEqual(out["picks"], [])
+        self.assertEqual(out["list"], [])
         self.assertEqual(out["funnel"][0]["after"], 0)
+
+
+    def test_annotated_list_has_chance_pct(self):
+        rows = [self.base(), self.base(team="A2", eventId=2, balanced=True),
+                self.base(team="A3", eventId=3, minutes="18")]
+        out = next_goal.build_next_goal(rows)
+        self.assertEqual(len(out["list"]), 3)
+        for ann in out["list"]:
+            self.assertIsInstance(ann["chance_pct"], int)
+            self.assertGreaterEqual(ann["chance_pct"], 0)
+            self.assertLessEqual(ann["chance_pct"], 100)
+
+    def test_zero_passers_one_nearest_miss(self):
+        r = self.base(balanced=True)
+        out = next_goal.build_next_goal([r])
+        self.assertEqual(len(out["picks"]), 1)
+        self.assertTrue(out["picks"][0]["nearest_miss"])
+        self.assertTrue(out["picks"][0]["sieves_failed"])
+        self.assertFalse(any(not p.get("nearest_miss") for p in out["picks"] if not p.get("nearest_miss")))
+
+    def test_two_passers_not_padded(self):
+        rows = [self.base(team="P1", eventId=1), self.base(team="P2", eventId=2, opponent="Z")]
+        out = next_goal.build_next_goal(rows)
+        self.assertEqual(len(out["picks"]), 2)
+        self.assertTrue(all(not p["nearest_miss"] for p in out["picks"]))
+
+    def test_four_passers_cap_three(self):
+        rows = [self.base(team="P%d" % i, eventId=i, opponent="O%d" % i) for i in range(1, 5)]
+        out = next_goal.build_next_goal(rows)
+        self.assertEqual(len(out["picks"]), 3)
+        self.assertTrue(all(not p["nearest_miss"] for p in out["picks"]))
+
+    def test_late_minute_not_excluded_by_cap(self):
+        r = self.base(minutes="88", live={"on": [1, 4], "cor": [1, 8], "da": [30, 55]},
+                      opp_att={"gf_avg": 2.4})
+        out = next_goal.build_next_goal([r])
+        # sito minut nie kasuje; przy silnej LIVE pełny passer możliwy
+        self.assertEqual(out["funnel"][1]["after"], 1)
+        self.assertEqual(len(out["picks"]), 1)
+        self.assertFalse(out["picks"][0]["nearest_miss"])
+
+    def test_hit_probability_falls_with_time(self):
+        early = self.base(minutes="40")
+        late = self.base(minutes="88")
+        pe = next_goal.hit_probability(early)
+        pl = next_goal.hit_probability(late)
+        self.assertGreater(pe, pl)
+        self.assertGreater(pl, 0)
+        # brak LIVE → nadal int 0–100
+        bare = self.base(live={}, minutes=None)
+        pb = next_goal.hit_probability(bare)
+        self.assertIsInstance(pb, int)
+        self.assertGreaterEqual(pb, 0)
+        self.assertLessEqual(pb, 100)
+
+    def test_passer_has_chance_pct_not_nearest(self):
+        out = next_goal.build_next_goal([self.base()])
+        p = out["picks"][0]
+        self.assertFalse(p["nearest_miss"])
+        self.assertEqual(p["sieves_failed"], [])
+        self.assertIsInstance(p["chance_pct"], int)
+        self.assertEqual(p["chance_pct"], next_goal.hit_probability(self.base()))
+
+    def test_snapshot_keeps_nearest_miss_fields(self):
+        r = self.base(balanced=True)
+        pick = next_goal.build_next_goal([r])["picks"][0]
+        snap = next_goal.snapshot_from_pick(pick, "2026-11-06 16:00:00")
+        self.assertTrue(snap["nearest_miss"])
+        self.assertTrue(snap["sieves_failed"])
+        self.assertEqual(snap["chance_pct"], pick["chance_pct"])
 
     def test_holes_payload_includes_next_goal_without_changing_rules(self):
         # pusta lista: next_goal obecne; rule/chance_rule nienaruszone w module

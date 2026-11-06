@@ -2,6 +2,8 @@
 Czyste funkcje. Nie zmienia dziurawych obron (sortowanie/progi/sekcje)."""
 from __future__ import annotations
 
+import math
+
 MIN_LO = 25  # dolny próg top 3; BEZ górnego limitu (gole 85–90+ częste)
 DEAD_MIN = 50
 LEARN_MIN_SETTLED = 15
@@ -263,13 +265,142 @@ def passed_sieves(row):
     return [name for name, fn in SIEVES if fn(row)]
 
 
-def _pick(row, pressure, score, comps, adj):
+def failed_sieves(row):
+    return [name for name, fn in SIEVES if not fn(row)]
+
+
+def _tempo(row):
+    """Tempo LIVE vs baseline (~8 celnych/90 i ~80 groźnych/90 = 1.0). Clamp 0.35–2.2."""
+    live = row.get("live") or {}
+    mi = parse_minute(row.get("minutes"))
+    if mi is None:
+        mi = 45
+    elapsed = max(mi, 1) / 90.0
+    parts = []
+    on = _pair(live, "on")
+    if on:
+        rate = (on[0] + on[1]) / elapsed
+        parts.append(rate / 8.0)
+    da = _pair(live, "da")
+    if da:
+        rate = (da[0] + da[1]) / elapsed
+        parts.append(rate / 80.0)
+    if not parts:
+        return 1.0
+    return max(0.35, min(2.2, sum(parts) / len(parts)))
+
+
+def hit_probability(row):
+    """P(kolejny gol) × P(rywal go strzeli) → int 0–100. Publiczna „Szanse wygranej”."""
+    mi = parse_minute(row.get("minutes"))
+    if mi is None:
+        mi = 45
+    remaining = max(0.0, (98 - mi) / 90.0)
+    tempo = _tempo(row)
+    g = leaky_rival_goals(row)
+    if g is None:
+        rywal_gd = 0
+    else:
+        rywal_gd = g[1] - g[0]
+    state = {-1: 1.15, 0: 1.10, 1: 1.00}.get(rywal_gd, 1.0)
+    pr = next_live_pressure(row.get("live"))
+    pressure = 0.50 if pr is None else float(pr["share"])
+    late = 1.0
+    if mi >= 80 and rywal_gd < 2:
+        open_game = (pressure >= 0.60) or rywal_gd in (-1, 0)
+        if open_game:
+            late = 1.20 if mi < 90 else 1.15
+    lam = 2.4 * remaining * tempo * state * late
+    p_more = 1.0 - math.exp(-lam) if lam > 0 else 0.0
+    p_rival = 0.50 + 0.70 * (pressure - 0.50)
+    p_rival = max(0.12, min(0.88, p_rival))
+    return int(round(100.0 * p_more * p_rival))
+
+
+def sieve_closeness(name, row):
+    """0–1: 1 = pass; ułamek gdy blisko. Używane do nearest-miss."""
+    fn = dict(SIEVES).get(name)
+    if fn and fn(row):
+        return 1.0
+    if name == "minuta ≥ 25":
+        mi = parse_minute(row.get("minutes"))
+        if mi is None:
+            return 0.0
+        return max(0.0, min(1.0, mi / float(MIN_LO)))
+    if name == "dane LIVE o celnych":
+        return 0.0
+    if name == "nie wyrównany":
+        return 0.0
+    if name == "rywal nie prowadzi 2+":
+        g = leaky_rival_goals(row)
+        if not g:
+            return 0.0
+        gd = g[1] - g[0]
+        if gd < 2:
+            return 1.0
+        # gd=2 → ~0.35, gd≥4 → 0
+        return max(0.0, 1.0 - (gd - 1) / 3.0)
+    if name == "presja LIVE (celne ≥60% / wyjątek)":
+        live = row.get("live")
+        o = _on_share(live)
+        if not o:
+            return 0.0
+        share, a, b = o
+        # blisko 60% i ≥2 celnych
+        share_c = max(0.0, min(1.0, share / 0.60))
+        shots_c = max(0.0, min(1.0, b / 2.0))
+        return 0.6 * share_c + 0.4 * shots_c
+    if name == "silny rywal (≥1,5 gola/mecz lub ekstremalne LIVE)":
+        if extreme_live(row.get("live")):
+            return 1.0
+        ga = (row.get("opp_att") or {}).get("gf_avg")
+        if ga is None:
+            return 0.0
+        return max(0.0, min(1.0, float(ga) / 1.5))
+    if name == "temperatura ze strzałów lub ekstremalne LIVE":
+        if extreme_live(row.get("live")):
+            return 1.0
+        t = row.get("t") or {}
+        if t.get("shots") is True:
+            return 1.0
+        # bez strzałów – lekka bliskość z temp
+        temp = t.get("temp")
+        if temp is None:
+            return 0.0
+        return max(0.0, min(0.7, float(temp) / 100.0))
+    if name == "nie martwy mecz":
+        mi = parse_minute(row.get("minutes"))
+        if mi is None or mi < DEAD_MIN:
+            return 1.0
+        live = row.get("live")
+        o = _pair(live, "on")
+        d = _pair(live, "da")
+        on_sum = (o[0] + o[1]) if o else 0
+        da_sum = (d[0] + d[1]) if d else 0
+        # im więcej aktywności, tym bliżej przejścia
+        on_c = max(0.0, min(1.0, on_sum / 3.0))
+        da_c = max(0.0, min(1.0, da_sum / 40.0))
+        return 0.5 * on_c + 0.5 * da_c
+    return 0.0
+
+
+def closeness_map(row):
+    out = {}
+    for name, fn in SIEVES:
+        out[name] = 1.0 if fn(row) else sieve_closeness(name, row)
+    return out
+
+
+def _pick(row, pressure, score, comps, adj, *, nearest_miss=False, sieves_failed=None, chance_pct=None):
     g = leaky_rival_goals(row) or (None, None)
     leaky_gf, rival_gf = g
     live = row.get("live") or {}
     opp = row.get("opponent") or "?"
     pr = pressure if isinstance(pressure, dict) else next_live_pressure(live)
-    share = pr["share"] if pr else 0
+    share = pr["share"] if pr else 0.5
+    if chance_pct is None:
+        chance_pct = hit_probability(row)
+    failed = list(sieves_failed) if sieves_failed is not None else failed_sieves(row)
     return {
         "team": row.get("team"),
         "opponent": row.get("opponent"),
@@ -286,23 +417,52 @@ def _pick(row, pressure, score, comps, adj):
         "temp": (row.get("t") or {}).get("temp"),
         "shots": (row.get("t") or {}).get("shots"),
         "gf_avg": (row.get("opp_att") or {}).get("gf_avg"),
-        "next_goal_score": score,
-        "chance_pct": score,  # szansa trafienia 0–100 → UI tylko jako „N%”
-        "score_parts": comps["parts"],
-        "learning_delta": adj.get("delta", 0),
-        "learning_notes": adj.get("notes") or [],
+        "next_goal_score": score if score is not None else chance_pct,
+        "chance_pct": int(chance_pct),
+        "score_parts": (comps or {}).get("parts") if comps else [],
+        "learning_delta": (adj or {}).get("delta", 0),
+        "learning_notes": (adj or {}).get("notes") or [],
         "sieves_passed": passed_sieves(row),
+        "sieves_failed": failed,
+        "nearest_miss": bool(nearest_miss),
         "tip": "%s — następny gol" % opp,
         "eventId": row.get("eventId"),
         "betradarId": row.get("betradarId"),
         "tournament": row.get("tournament"),
         "category": row.get("category"),
         "balanced": bool(row.get("balanced")),
+        "uid": row.get("uid"),
+    }
+
+
+def _annotate_row(row, lessons=None):
+    passed = passed_sieves(row)
+    failed = failed_sieves(row)
+    close = {name: (1.0 if name in passed else sieve_closeness(name, row)) for name, _ in SIEVES}
+    chance = hit_probability(row)
+    return {
+        "eventId": row.get("eventId"),
+        "side": row.get("side"),
+        "uid": row.get("uid"),
+        "chance_pct": chance,
+        "sieves_passed": passed,
+        "sieves_failed": failed,
+        "closeness": {k: round(v, 4) for k, v in close.items()},
+        "closeness_sum": round(sum(close.values()), 4),
+        "tip": "%s — następny gol" % (row.get("opponent") or "?"),
+        "temp": (row.get("t") or {}).get("temp"),
+        "minutes": row.get("minutes"),
+        "live": {
+            "on": (row.get("live") or {}).get("on"),
+            "cor": (row.get("live") or {}).get("cor"),
+            "da": (row.get("live") or {}).get("da"),
+        },
+        "nearest_miss": False,
     }
 
 
 def build_next_goal(lst, max_picks=3, lessons=None):
-    """Z listy dziurawych (temp ≥ 40) buduje lejek sit i max 3 picki."""
+    """Lejek sit + adnotacje całej listy + max 3 picki (albo 1 nearest-miss)."""
     rows = list(lst or [])
     funnel = [{"name": "start (temperatura ≥ 40)", "before": len(rows), "after": len(rows)}]
     cur = rows
@@ -310,17 +470,54 @@ def build_next_goal(lst, max_picks=3, lessons=None):
         before = len(cur)
         cur = [r for r in cur if fn(r)]
         funnel.append({"name": name, "before": before, "after": len(cur)})
+
+    annotated = []
+    for r in rows:
+        ann = _annotate_row(r, lessons)
+        annotated.append(ann)
+
     scored = []
     for r in cur:
         pr = next_live_pressure(r.get("live"))
         got = next_goal_score(r, pr, lessons)
-        if pr is None or got is None:
+        chance = hit_probability(r)
+        if got is None:
+            # pełne sito wymaga LIVE celnych, więc pressure zwykle jest; fallback
+            scored.append(_pick(r, pr, chance, {"parts": []}, {"delta": 0, "notes": []},
+                                nearest_miss=False, sieves_failed=[], chance_pct=chance))
             continue
         sc, comps, adj = got
-        scored.append(_pick(r, pr, sc, comps, adj))
-    scored.sort(key=lambda p: (-p["next_goal_score"], -(p.get("temp") or 0), p.get("team") or ""))
-    return {"funnel": funnel, "picks": scored[:max_picks]}
+        scored.append(_pick(r, pr, sc, comps, adj, nearest_miss=False, sieves_failed=[], chance_pct=chance))
+    scored.sort(key=lambda p: (-p["chance_pct"], -(p.get("temp") or 0), p.get("team") or ""))
+    picks = scored[:max_picks]
 
+    if not picks and rows:
+        # dokładnie jeden nearest-miss: max closeness_sum, potem chance_pct, temp
+        best_i = max(
+            range(len(rows)),
+            key=lambda i: (
+                annotated[i]["closeness_sum"],
+                annotated[i]["chance_pct"],
+                annotated[i].get("temp") or 0,
+            ),
+        )
+        r = rows[best_i]
+        ann = annotated[best_i]
+        pr = next_live_pressure(r.get("live"))
+        got = next_goal_score(r, pr, lessons)
+        chance = ann["chance_pct"]
+        if got is None:
+            pick = _pick(r, pr, chance, {"parts": []}, {"delta": 0, "notes": []},
+                         nearest_miss=True, sieves_failed=ann["sieves_failed"], chance_pct=chance)
+        else:
+            sc, comps, adj = got
+            pick = _pick(r, pr, sc, comps, adj, nearest_miss=True,
+                         sieves_failed=ann["sieves_failed"], chance_pct=chance)
+        picks = [pick]
+        annotated[best_i] = dict(ann)
+        annotated[best_i]["nearest_miss"] = True
+
+    return {"funnel": funnel, "picks": picks, "list": annotated}
 
 def snapshot_from_pick(pick, time_warsaw):
     """Pełny snapshot w chwili typowania (do analizy retrospectivy)."""
@@ -356,6 +553,9 @@ def snapshot_from_pick(pick, time_warsaw):
         "score_parts": pick.get("score_parts"),
         "learning_delta": pick.get("learning_delta", 0),
         "sieves_passed": pick.get("sieves_passed") or [],
+        "sieves_failed": pick.get("sieves_failed") or [],
+        "nearest_miss": bool(pick.get("nearest_miss")),
+        "chance_pct": pick.get("chance_pct"),
         "balanced": False,
         "time_warsaw": time_warsaw,
         "status": "pending",

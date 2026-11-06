@@ -855,6 +855,7 @@ def ng_attach(lst):
         p["already_tipped"] = p.get("eventId") in pending_ids
     return {
         "funnel": built["funnel"], "picks": built["picks"],
+        "list": built.get("list") or [],
         "history": next_goal.history_view(log),
         "insights": {"texts": insights["texts"], "settled": insights["settled"], "wins": insights["wins"],
                      "losses": insights["losses"], "pending": insights["pending"], "hit_rate": insights["hit_rate"],

@@ -214,12 +214,12 @@ return `<div class="hc${hot?' hot':''}${o?' op':''}" data-k="${hk(r)}"><button c
 <div class="l5" title="Ost. 5 wyników (od najnowszego), na czerwono gole stracone">${r.games.map(g=>`<span>${g.gf}:<em>${g.ga}</em></span>`).join('')}</div>
 <div class="hm"><span>${esc([r.category,r.tournament].filter(Boolean).join(' · '))}</span></div><div class="hm"><span>vs ${esc(r.opponent||'')} (${r.side=='D'?'dom':'wyjazd'})</span>${r.opp_att?`<span class="chip oa" title="Rywal: gole/mecz z ost. ${r.opp_att.n} (≤90 dni)">⚔ rywal ${String(r.opp_att.gf_avg).replace('.',',')}/m</span>`:''}<span class="chip">● ${r.minutes!=null?esc(r.minutes)+"'":'LIVE'} ${esc(r.score||'')}</span></div>
 <div class="tmp"><div class="tg"><i></i><b style="left:${t.temp}%"></b></div><span class="tv">${t.temp}</span><span class="tl">obrona: ${esc(t.label)}${t.shots?'':'<br><span class="nd">bez strzałów</span>'}</span></div>
-${Cg?`<div class="tmp"><div class="tg cg"><i></i><b style="left:${Cg.score}%"></b></div><span class="tv">${Cg.score}</span><span class="tl">szansa na gola rywala: ${esc(Cg.label)}</span></div>`:''}</button>
+${r._ngChance!=null?`<div class="tmp"><div class="tg cg"><i></i><b style="left:${r._ngChance}%"></b></div><span class="tv">${r._ngChance}%</span><span class="tl">Szanse wygranej: ${r._ngChance}%</span></div>${r._ngFailed&&r._ngFailed.length?`<div class="hn" style="padding:0 12px 6px">Do top 3 brakuje: ${esc(r._ngFailed.join(', '))}</div>`:''}`:(Cg?`<div class="tmp"><div class="tg cg"><i></i><b style="left:${Cg.score}%"></b></div><span class="tv">${Cg.score}</span><span class="tl">szansa na gola rywala: ${esc(Cg.label)}</span></div>`:'')}</button>
 <div class="hb"><div><div class="hi">${r.balanced?`<div class="hw bal"><b>⚖ Mecz wyrównany – brak wyraźnego typu na następnego gola.</b> Powód: ${esc(r.balanced_why||'')}. Gol może paść w obie strony, dlatego mecz jest poniżej wszystkich meczów z jednym wyraźnym kierunkiem.</div>`:''}${r.early?`<div class="hw erl"><b>⏱ Za wcześnie:</b> dopiero ${esc(r.minutes||'?')}' – mała próbka statystyk LIVE (presja, celne, rożne). Do 25. minuty mecz jest niżej w rankingu.</div>`:''}<h4>Ostatnie 5 meczów <small class="nd">(celne/strzały rywala)</small></h4>${gm}${adjn}
 <h4>Gole strzelone vs stracone</h4><div class="lg2"><span><i style="background:var(--g)"></i>strzelone</span><span><i style="background:var(--b2)"></i>stracone</span><span>(od najstarszego)</span></div><div class="ch">${ch}</div>
 <h4>Podsumowanie</h4><div class="kv"><div><b>${r.clean}</b><small>czyste konta</small></div><div><b>${r.two_plus}</b><small>mecze z ≥2 straconymi</small></div><div><b>${t.on_a_avg??'–'}</b><small>śr. celnych rywali</small></div><div><b>${t.tot_a_avg??'–'}</b><small>śr. strzałów rywali</small></div></div>
 <h4>Atak rywala – ${esc(r.opponent||'')}</h4>${oa}
-<h4>Szansa na gola rywala – ${Cg?Cg.score:'–'}</h4>${cgx}
+${r._ngChance!=null?`<h4>Szanse wygranej – ${r._ngChance}%</h4><div class="hn">Prawdopodobieństwo wygranej typu „rywal strzeli następnego gola”.${r._ngFailed&&r._ngFailed.length?' Brakuje do top 3: '+esc(r._ngFailed.join(', '))+'':''}</div>`:`<h4>Szansa na gola rywala – ${Cg?Cg.score:'–'}</h4>${cgx}`}
 <h4>Kiedy traci gole</h4>${kt}
 <h4>Ten mecz – LIVE</h4>${lv}<div class="hn">Statystyki z ostatnich 5 meczów – forma, nie gwarancja</div></div></div></div></div>`}
 function hsec(a){const g=k=>a.filter(r=>(r.section||'main')==k),m=g('main'),e=g('early'),b=g('balanced');
@@ -238,7 +238,7 @@ $('#hall').onclick=()=>{const all=a.every(r=>HO[hk(r)]);a.forEach(r=>HO[hk(r)]=!
 el.querySelectorAll('.hc .hh').forEach(b=>b.onclick=()=>{const c=b.parentNode,k=c.dataset.k;HO[k]=!HO[k];c.classList.toggle('op',HO[k]);$('#hall').textContent=a.length&&a.every(r=>HO[hk(r)])?'Zwiń wszystko':'Rozwiń wszystko'});wstatus()}
 function drawNext(){if(!W)return;const el=$('#np');
 if(W.status=='computing'){const p=W.progress||{},pc=p.total?Math.round(100*p.done/p.total):3;el.innerHTML=`<div class="hx"><div class="pg"><i style="width:${pc}%"></i></div><div class="hfoot">Liczę formę drużyn z meczów LIVE (${p.done||0}/${p.total||'?'})…</div>${'<div class="sk"></div>'.repeat(3)}</div>`;$('#st').textContent='Liczę… ('+(p.done||0)+'/'+(p.total||'?')+')';return}
-const N=W.next_goal||{funnel:[],picks:[],history:[],insights:{},learning:{}},F=N.funnel||[],P=N.picks||[],H=N.history||[],I=N.insights||{},L=N.learning||{};
+const N=W.next_goal||{funnel:[],picks:[],list:[],history:[],insights:{},learning:{}},F=N.funnel||[],P=N.picks||[],H=N.history||[],I=N.insights||{},L=N.learning||{};
 window._ngPicks=P;window._ngHist=H;
 const stLab={pending:'oczekuje',win:'wygrana',loss:'przegrana'};
 const funnel=`<div class="nf"><h3>Lejek sit · z listy dziurawych do top 3</h3><ol>${F.map(s=>`<li>${esc(s.name)}: <b>${s.before}</b> → <b>${s.after}</b></li>`).join('')}</ol></div>`;
@@ -248,22 +248,36 @@ const lv=`celne ${Lv.on?Lv.on[0]+'–'+Lv.on[1]:'–'} · rożne ${Lv.cor?Lv.cor
 const stan=p.leaky_gf!=null?`${p.leaky_gf}:${p.rival_gf} (dziurawa:rywal)`:esc(p.score||'');
 const btn=p.already_tipped?`<button class="tg" disabled>Już typujesz ten mecz</button>`:`<button class="tg ng-tip" data-i="${i}">Typuj</button>`;
 const win=pct!=null?`Szanse wygranej: ${pct}%`:'Szanse wygranej: –';
-return `<div class="nc${hot?' hot':''}"><div class="meta"><span>${esc([p.category,p.tournament].filter(Boolean).join(' · '))}</span><span>● ${p.minutes!=null?esc(p.minutes)+"'":'LIVE'}</span><span>${stan}</span></div>
+const miss=p.nearest_miss?`<div class="hw erl" style="margin:8px 0"><b>Najbliższy kandydat (nie top 3)</b> — brakuje klasyfikacji: ${esc((p.sieves_failed||[]).join(', ')||'?')}. Typuj działa.</div>`:'';
+return `<div class="nc${hot?' hot':''}${p.nearest_miss?'':''}"><div class="meta"><span>${esc([p.category,p.tournament].filter(Boolean).join(' · '))}</span><span>● ${p.minutes!=null?esc(p.minutes)+"'":'LIVE'}</span><span>${stan}</span></div>
 <div style="margin-top:6px;font-size:13px"><b>${esc(p.team)}</b> <span class="nd">(dziurawa)</span> vs <b>${esc(p.opponent)}</b></div>
-<div class="tip">🎯 ${esc(p.tip)}</div>
+<div class="tip">🎯 ${esc(p.tip)}</div>${miss}
 <div class="tip" style="font-size:20px;margin:8px 0 12px">${win}${p.learning_delta?` <small class="nd">(${p.learning_delta>0?'+':''}${p.learning_delta} pp nauka)</small>`:''}</div>
 <details style="margin:0 0 8px"><summary class="hn" style="cursor:pointer">Uzasadnienie (nie jest to osobna „szansa”)</summary>
 <div class="kv"><div><b>${prs==null?'–':prs.toFixed(2).replace('.',',')}</b><small>presja LIVE (udział 0–1)</small></div><div><b>${p.temp??'–'}</b><small>temp. obrony (0–100)${p.shots?'':' · bez strzałów'}</small></div><div><b>${p.gf_avg==null?'–':String(p.gf_avg).replace('.',',')}</b><small>gole rywala/mecz</small></div></div>
 <div class="hn" style="margin-top:8px">LIVE [dziurawa, rywal]: ${lv}</div>
 </details>
 <div style="margin-top:10px">${btn}</div></div>`};
-const hist=H.length?`<div class="nf"><h3>Historia typów (W/P)</h3>${H.map(h=>`<div class="wl" style="cursor:pointer" data-tid="${esc(h.id)}"><b>${esc(h.time_warsaw||'')}</b> · ${esc(h.match||'')} · <b>${esc(h.tip||h.opponent||'')}</b><br><small>przy typie: ${h.minute!=null?h.minute+"'":'?'} ${esc(h.score||'')} · <b>${esc(stLab[h.status]||h.status)}</b>${h.next_goal_score!=null?' · Szanse wygranej: '+h.next_goal_score+'%':''}${h.goal_minute!=null?' · gol '+h.goal_minute+"'":''}${h.final?' · końcowy '+esc(h.final):''}</small></div>`).join('')}</div>`:'<div class="nf"><h3>Historia typów</h3><div class="empty">Brak typów – kliknij „Typuj” na karcie top 3.</div></div>';
+const topBlock=P.length?`<div class="nf"><h3>${P.some(p=>p.nearest_miss)?'Najbliższy typ (nikt nie przeszedł wszystkich sit)':'Top typy · następny gol rywala'}</h3>${P.map(card).join('')}</div>`:'';
+const ann={},annList=N.list||[];
+annList.forEach(a=>{if(a.eventId!=null&&a.side)ann[a.eventId+':'+a.side]=a;if(a.eventId!=null&&a.uid!=null)ann[a.eventId+':u'+a.uid]=a});
+const q=hq.trim().toLowerCase();
+const base=(W.list||[]).map(r=>{const a=ann[r.eventId+':'+r.side]||ann[r.eventId+':u'+r.uid]||{};const x=Object.assign({},r);x._ngChance=a.chance_pct!=null?a.chance_pct:null;x._ngFailed=a.sieves_failed||[];return x});
+const a=base.filter(r=>!q||(r.team||'').toLowerCase().includes(q)||(r.opponent||'').toLowerCase().includes(q));
+const listBlock=`<div class="nf"><h3>Wszystkie dziurawe (jak w zakładce Dziurawe) · Szanse wygranej na każdej pozycji</h3>
+<div class="hbar"><input id="hq" type="search" placeholder="Szukaj drużyny…" value="${esc(hq)}"><button id="hall">${a.length&&a.every(r=>HO[hk(r)])?'Zwiń wszystko':'Rozwiń wszystko'}</button></div>
+<div id="hl">${a.length?hsec(a):`<div class="empty">${(W.list||[]).length?'Brak drużyn dla „'+esc(hq)+'”':'Brak dziurawych obron w meczach LIVE (temperatura ≥ 40)'}</div>`}</div></div>`;
+const hist=H.length?`<div class="nf"><h3>Historia typów (W/P)</h3>${H.map(h=>`<div class="wl" style="cursor:pointer" data-tid="${esc(h.id)}"><b>${esc(h.time_warsaw||'')}</b> · ${esc(h.match||'')} · <b>${esc(h.tip||h.opponent||'')}</b><br><small>przy typie: ${h.minute!=null?h.minute+"'":'?'} ${esc(h.score||'')} · <b>${esc(stLab[h.status]||h.status)}</b>${h.next_goal_score!=null?' · Szanse wygranej: '+h.next_goal_score+'%':''}${h.goal_minute!=null?' · gol '+h.goal_minute+"'":''}${h.final?' · końcowy '+esc(h.final):''}</small></div>`).join('')}</div>`:'<div class="nf"><h3>Historia typów</h3><div class="empty">Brak typów – kliknij „Typuj” na karcie top / najbliższego kandydata.</div></div>';
 const wn=`<div class="nf"><h3>Wnioski</h3>${(I.texts||[]).map(x=>`<div class="hn">• ${esc(x)}</div>`).join('')||'<div class="hn">Brak rozliczonych typów.</div>'}
 <div class="hn" style="margin-top:8px">${esc(L.note||'')}${(L.lessons||[]).length?'<br>Aktywne lekcje: '+L.lessons.map(x=>esc(x.bucket)+' '+(x.delta>0?'+':'')+x.delta+' (n='+x.n+')').join('; '):''}</div>
 <div class="hn">${N.persist_working?'Rejestr typów jest w prywatnym giscie (przeżywa restart).':N.persistent?'Gist skonfigurowany, ale zapis chwilowo nie działa – lokalny cache do restartu.':'Brak GIST_TOKEN/GIST_ID – rejestr zeruje się po restarcie.'}</div></div>`;
-el.innerHTML=`<div class="hx">${funnel}${P.length?P.map(card).join(''):'<div class="empty"><b>Puste top 3 – to zamierzone.</b><br>Żadna drużyna nie przeszła wszystkich sit. Lepiej pusto niż słabe typy.</div>'}${hist}${wn}
+const keep=document.activeElement&&document.activeElement.id=='hq';
+el.innerHTML=`<div class="hx">${funnel}${topBlock}${listBlock}${hist}${wn}
 <div id="ngd"></div>
-<div class="hfoot"><b>Forma + presja teraz, nie gwarancja.</b> Brak kolejnego gola do końca = pudło. Twarde sita nie są rozluźniane przez naukę.</div></div>`;
+<div class="hfoot"><b>Forma + presja teraz, nie gwarancja.</b> Brak kolejnego gola do końca = pudło. Twarde sita nie są rozluźniane przez naukę. Na liście zawsze te same mecze co w Dziurawych — wyróżnione są tylko top 3 (albo 1 najbliższy kandydat).</div></div>`;
+const i=$('#hq');if(i){i.oninput=()=>{hq=i.value;drawNext()};if(keep){i.focus();i.setSelectionRange(i.value.length,i.value.length)}}
+const hall=$('#hall');if(hall)hall.onclick=()=>{const all=a.every(r=>HO[hk(r)]);a.forEach(r=>HO[hk(r)]=!all);drawNext()};
+el.querySelectorAll('.hc .hh').forEach(b=>b.onclick=()=>{const c=b.parentNode,k=c.dataset.k;HO[k]=!HO[k];c.classList.toggle('op',HO[k]);const h=$('#hall');if(h)h.textContent=a.length&&a.every(r=>HO[hk(r)])?'Zwiń wszystko':'Rozwiń wszystko'});
 el.querySelectorAll('.ng-tip').forEach(b=>b.onclick=async()=>{const pick=window._ngPicks[+b.dataset.i];if(!pick)return;
 b.disabled=true;b.textContent='Zapisuję…';
 try{const r=await(await fetch('/api/next-goal/tip',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(pick)})).json();
