@@ -7,3 +7,5 @@ venv/
 favsite.zip
 .DS_Store
 pro_log.json
+next_goal_log.json
+next_goal_lessons.json
