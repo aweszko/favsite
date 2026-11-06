@@ -2,7 +2,7 @@
 Czyste funkcje. Nie zmienia dziurawych obron (sortowanie/progi/sekcje)."""
 from __future__ import annotations
 
-MIN_LO, MIN_HI = 25, 75
+MIN_LO = 25  # dolny próg top 3; BEZ górnego limitu (gole 85–90+ częste)
 DEAD_MIN = 50
 LEARN_MIN_SETTLED = 15
 LEARN_BUCKET_MIN = 8
@@ -123,8 +123,9 @@ def extreme_live(live):
 
 
 def sieve_minute(row):
+    """Top 3: minuta ≥ 25. Bez max 75 — końcówka (88', 90+) może wejść przy silnej presji."""
     mi = parse_minute(row.get("minutes"))
-    return mi is not None and MIN_LO <= mi <= MIN_HI
+    return mi is not None and mi >= MIN_LO
 
 
 def sieve_live_on(row):
@@ -197,7 +198,7 @@ def sieve_dead(row):
 
 
 SIEVES = (
-    ("minuta 25–75", sieve_minute),
+    ("minuta ≥ 25", sieve_minute),
     ("dane LIVE o celnych", sieve_live_on),
     ("nie wyrównany", sieve_balanced),
     ("rywal nie prowadzi 2+", sieve_score_gd),
@@ -233,9 +234,16 @@ def score_components(row, pressure=None):
     if mi is not None and g is not None:
         leaky_gf, rival_gf = g
         rywal_gd = rival_gf - leaky_gf
-        time_f = max(0.0, (85 - mi) / 60.0)
+        # Zapas na doliczony czas (~98'): przy 88' remaining≈10/90, nie ~0.
+        remaining = max(0.0, (98 - mi) / 90.0)
         state_m = {-1: 1.15, 0: 1.10, 1: 1.00}.get(rywal_gd, 1.0)
-        time_state = min(1.0, time_f * state_m)
+        # Lekki mnożnik końcówki 80–90+, gdy gra otwarta (nie prowadzenie rywala 2+ — i tak odsiane sitami).
+        late = 1.0
+        if mi >= 80 and rywal_gd < 2:
+            open_game = (share is not None and share >= 0.60) or rywal_gd in (-1, 0)
+            if open_game:
+                late = 1.20 if mi < 90 else 1.15
+        time_state = min(1.0, remaining * state_m * late)
         comps.append(("czas_stan", 0.15, time_state))
     W = sum(w for _, w, _ in comps)
     parts = [{"name": n, "weight": round(w / W * 100), "value": int(round(x * 100))} for n, w, x in comps]
@@ -279,6 +287,7 @@ def _pick(row, pressure, score, comps, adj):
         "shots": (row.get("t") or {}).get("shots"),
         "gf_avg": (row.get("opp_att") or {}).get("gf_avg"),
         "next_goal_score": score,
+        "chance_pct": score,  # szansa trafienia 0–100 → UI tylko jako „N%”
         "score_parts": comps["parts"],
         "learning_delta": adj.get("delta", 0),
         "learning_notes": adj.get("notes") or [],
@@ -506,7 +515,7 @@ def analyze_tip(entry, settlement=None):
     A = (
         "W chwili typowania: %s' wynik home:away %s (dziurawa %s:%s, rywal_gd=%s). "
         "LIVE celne %s–%s, rożne %s–%s, groźne %s–%s. Presja LIVE (55/30/15) %s%%, "
-        "temp. obrony %s%s, atak rywala %s gola/mecz, next_goal_score %s."
+        "temp. obrony %s%s, atak rywala %s gola/mecz, szansa %s%%."
         % (
             mi if mi is not None else "?",
             entry.get("score") or "?",
@@ -548,9 +557,9 @@ def analyze_tip(entry, settlement=None):
             reasons.append("mecz domknął się bez kolejnego gola mimo sygnałów LIVE")
         C = {"code": "no_goal", "text": "Pudło „brak gola”: " + "; ".join(reasons) + "."}
         D = (
-            "Kontrfakt: sito czasu mogło odrzucić typ po %s' przy niskim tempie – rozważ zaostrzenie górnej granicy minut przy rywal_gd≥1."
+            "Kontrfakt: przy typie po %s' i rywal_gd≥1 warto było mocniej ważyć ryzyko „usiadł i dowiózł” / martwego tempa – nie samą minutę."
             % (mi if mi is not None else "?")
-            if (mi or 0) >= 70 or gd == 1
+            if (mi or 0) >= 80 or gd == 1
             else "Kontrfakt: twarde sita przepuściły typ zasadnie; problemem był brak zdarzenia, nie mylący kierunek."
         )
     elif status == "loss":
@@ -625,7 +634,7 @@ def _bucket_minute(mi):
         return "25-40"
     if mi < 60:
         return "40-60"
-    return "60-75"
+    return "60+"
 
 
 def _bucket_state(gd):
@@ -703,7 +712,7 @@ def aggregate_insights(log):
     labels = {
         "minuta_25-40": "minuta 25–40",
         "minuta_40-60": "minuta 40–60",
-        "minuta_60-75": "minuta 60–75",
+        "minuta_60+": "minuta 60+",
         "stan_dziurawa_+1": "dziurawa prowadzi 1",
         "stan_remis": "remis",
         "stan_rywal_+1": "rywal prowadzi 1",

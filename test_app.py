@@ -3,6 +3,7 @@ import unittest
 from datetime import datetime, timezone
 import app
 import next_goal
+app.HTML = open(__import__('os').path.join(__import__('os').path.dirname(app.__file__), 'index.html'), encoding='utf-8').read()
 
 SAMPLE_GAMES = [  # PRZYKŁADOWE
     {"on": 5, "tot": 12}, {"on": 3, "tot": 9}, {"on": None, "tot": None},
@@ -564,20 +565,31 @@ class TestNextGoal(unittest.TestCase):
         self.assertEqual(p["tip"], "Tikvesh — następny gol")
         self.assertGreaterEqual(p["next_goal_score"], 50)
 
-    def test_rivne_minute_out(self):
+    def test_rivne_late_minute_not_rejected(self):
+        # 88' NIE odpada przez minutę — gole 85–90+ są częste; przy silnej LIVE może wejść do top 3
         r = self.base(team="Rivne", opponent="Polissya", minutes="88", score="1:0", side="W",
-                      live={"on": [1, 4], "cor": [1, 8], "da": [30, 55]})
-        self.assertEqual(next_goal.build_next_goal([r])["picks"], [])
-        self.assertEqual(next_goal.build_next_goal([r])["funnel"][1]["after"], 0)
+                      live={"on": [1, 4], "cor": [1, 8], "da": [30, 55]},
+                      t={"temp": 69, "shots": True}, opp_att={"gf_avg": 2.4})
+        out = next_goal.build_next_goal([r])
+        self.assertEqual(out["funnel"][1]["name"], "minuta ≥ 25")
+        self.assertEqual(out["funnel"][1]["after"], 1)  # sito minut nie kasuje 88'
+        self.assertEqual(len(out["picks"]), 1)
+        self.assertIn("%", str(out["picks"][0].get("chance_pct")) + "%")  # pole pct
+        # czas przy 88' nie ≈ 0 (wzór 98-min)/90
+        c = next_goal.score_components(r)
+        time_part = next(x for x in c["parts"] if x["name"] == "czas_stan")
+        self.assertGreaterEqual(time_part["value"], 10)
 
-    def test_tanjong_minute_and_gd(self):
+    def test_tanjong_minute_ok_gd_out(self):
         r = self.base(team="Tanjong Pagar Reserve", opponent="Geylang Reserve", side="D",
                       minutes="89", score="0:7",
                       live={"on": [0, 5], "cor": [0, 4], "da": [10, 40]})
         out = next_goal.build_next_goal([r])
         self.assertEqual(out["picks"], [])
-        # odpada na minucie (sito 1)
-        self.assertEqual(out["funnel"][1]["after"], 0)
+        # minuta 89' przechodzi sito ≥25; odpada na rywal_gd +7
+        self.assertEqual(out["funnel"][1]["after"], 1)
+        gd_step = next(f for f in out["funnel"] if "prowadzi 2+" in f["name"])
+        self.assertEqual(gd_step["after"], 0)
 
     def test_kiryat_yam_early_and_no_rival_shots(self):
         r = self.base(team="Hapoel Kiryat Yam", opponent="Ashdod", side="D", minutes="18", score="2:0",
@@ -650,7 +662,7 @@ class TestNextGoalTips(unittest.TestCase):
             "live": {"on": [0, 3], "cor": [1, 3], "da": [21, 54]}, "pressure": 88, "pressure_share": 0.88,
             "pressure_parts": {"on": 1.0, "da": 0.72, "cor": 0.75}, "temp": 64, "shots": True, "gf_avg": 2.2,
             "next_goal_score": 80, "score_parts": [{"name": "presja", "weight": 50, "value": 88}],
-            "sieves_passed": ["minuta 25–75"], "tip": "Tikvesh — następny gol", "balanced": False,
+            "sieves_passed": ["minuta ≥ 25"], "tip": "Tikvesh — następny gol", "balanced": False,
             "tournament": "1. MFL", "category": "Macedonia",
         }
         p.update(kw); return p
@@ -726,11 +738,13 @@ class TestNextGoalTips(unittest.TestCase):
             log.append(e)
         ins = next_goal.aggregate_insights(log)
         self.assertFalse(ins["sample_too_small"])
-        self.assertTrue(any(L["bucket"] == "minuta_60-75" and L["delta"] < 0 for L in ins["lessons"]))
+        self.assertTrue(any(L["bucket"] == "minuta_60+" and L["delta"] < 0 for L in ins["lessons"]))
 
     def test_html_has_typoj_and_hash(self):
         self.assertIn("Typuj", app.HTML); self.assertIn("#nastepny", app.HTML)
         self.assertIn("Historia typów", app.HTML); self.assertIn("Wnioski", app.HTML)
+        self.assertIn("szansa trafienia", app.HTML)
+        self.assertNotIn(">next_goal_score<", app.HTML.replace(" ", ""))
 
 
 if __name__ == "__main__":
