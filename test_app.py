@@ -743,8 +743,10 @@ class TestNextGoalTips(unittest.TestCase):
     def test_html_has_typoj_and_hash(self):
         self.assertIn("Typuj", app.HTML); self.assertIn("#nastepny", app.HTML)
         self.assertIn("Historia typów", app.HTML); self.assertIn("Wnioski", app.HTML)
-        self.assertIn("szansa trafienia", app.HTML)
-        self.assertNotIn(">next_goal_score<", app.HTML.replace(" ", ""))
+        self.assertIn("Szanse wygranej:", app.HTML)
+        self.assertNotIn("szansa trafienia", app.HTML)
+        # jedyna jawna etykieta prawdopodobieństwa wygranej — nie „presja %” obok jako szansa
+        self.assertIn("presja LIVE (udział", app.HTML)
 
 
 if __name__ == "__main__":

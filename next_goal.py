@@ -515,7 +515,7 @@ def analyze_tip(entry, settlement=None):
     A = (
         "W chwili typowania: %s' wynik home:away %s (dziurawa %s:%s, rywal_gd=%s). "
         "LIVE celne %s–%s, rożne %s–%s, groźne %s–%s. Presja LIVE (55/30/15) %s%%, "
-        "temp. obrony %s%s, atak rywala %s gola/mecz, szansa %s%%."
+        "temp. obrony %s%s, atak rywala %s gola/mecz. Szanse wygranej: %s%%."
         % (
             mi if mi is not None else "?",
             entry.get("score") or "?",
