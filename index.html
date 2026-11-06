@@ -92,9 +92,10 @@ input:focus,button:focus-visible{outline:2px solid var(--g);outline-offset:1px}.
 .sk{height:96px;border-radius:16px;margin:0 0 10px;background:linear-gradient(90deg,#14110a 0,#2a2312 50%,#14110a 100%);background-size:200% 100%;animation:shm 1.3s infinite linear;border:1px solid #2f2710}
 @keyframes shm{to{background-position:-200% 0}}.pg{height:6px;border-radius:4px;background:#222;overflow:hidden;margin:12px 0 6px}.pg i{display:block;height:100%;background:var(--gg);transition:width .5s}
 .lg2{display:flex;gap:10px;font-size:11px;color:var(--s);margin:2px 0}.lg2 i{display:inline-block;width:9px;height:9px;border-radius:2px;margin-right:3px;vertical-align:-1px}
+.nf{margin:10px 0 16px;padding:12px;border:1px solid #2f2710;border-radius:14px;background:#14110a}.nf h3{margin:0 0 8px;font-size:13px;color:var(--g3)}.nf ol{margin:0;padding-left:18px;font-size:12px;color:var(--s)}.nf li{margin:3px 0}.nf b{color:var(--g3)}.nc{border:1px solid #3a3014;border-radius:16px;padding:14px;margin:0 0 12px;background:linear-gradient(180deg,#1a150c,#120e08)}.nc.hot{border-color:#c9a227;box-shadow:0 0 0 1px #c9a22744}.nc .tip{font-size:16px;font-weight:800;color:var(--g3);margin:6px 0 10px}.nc .meta{font-size:12px;color:var(--s);display:flex;flex-wrap:wrap;gap:8px}.nc .kv{display:grid;grid-template-columns:repeat(auto-fit,minmax(90px,1fr));gap:8px;margin-top:10px}.nc .kv b{display:block;font-size:16px;color:var(--g)}.nc .kv small{color:var(--s)}
 </style></head><body>
 <header><div class="top"><div class="brand"><img src="/icon.png" alt="Triumfator – herb" width="48" height="48"><div class="tx"><h1>Triumfator</h1><div class="sub">Porównywarka statystyk piłkarskich</div></div></div><span id="clk" class="tm"></span></div>
-<div class="main"><button data-v="list" class="on">Mecze</button><button data-v="rank">Ranking</button><button data-v="vip">VIP</button><button data-v="pro" class="pb">Pewniaki PRO</button><button data-v="worst">Dziurawe obrony</button></div>
+<div class="main"><button data-v="list" class="on">Mecze</button><button data-v="rank">Ranking</button><button data-v="vip">VIP</button><button data-v="pro" class="pb">Pewniaki PRO</button><button data-v="worst">Dziurawe obrony</button><button data-v="next">Następny gol</button></div>
 <div class="tabs" id="tabs"></div></header>
 <div id="st">Ładowanie…</div>
 <div id="list"></div>
@@ -106,6 +107,7 @@ input:focus,button:focus-visible{outline:2px solid var(--g);outline-offset:1px}.
 <div id="vip" hidden><div class="vnote">VIP · Najostrzejsze typy – żadna pewność, tylko spełnione kryteria · bez progu kursu (faworyt 1,00–2,00) · LIVE: pełna dominacja</div><div id="vp"></div></div>
 <div id="pro" hidden><div class="vnote">Pewniaki PRO · Etap 1: lista obserwowanych (kryteria ost. 5) · Etap 2: typ dopiero LIVE przy pełnej dominacji i presji w ost. 10 min · <b>Typy to spełnione kryteria, nie gwarancja</b></div><div id="pp"></div></div>
 <div id="worst" hidden><div class="vnote">Dziurawe obrony · tylko mecze LIVE · temperatura obrony z ost. 5 meczów (5/5) z korektą siły rywala · <b>forma, nie gwarancja</b></div><div id="wp"></div></div>
+<div id="next" hidden><div class="vnote">Następny gol · twarde sita na top 3 · rywal dziurawej strzeli <b>następnego</b> gola · forma + presja teraz, nie gwarancja · brak kolejnego gola = pudło</div><div id="np"></div></div>
 <footer>Źródła: Superbet PL (oferta, kursy 1X2), Sportradar (statystyki strzałów). Godziny: Europe/Warsaw. Brak danych = „brak danych”, nic nie jest szacowane.</footer>
 <script>
 const $=s=>document.querySelector(s);let view='list',tab='live',rmode='all',M=null,R=null,open={};
@@ -116,7 +118,7 @@ function addDay(s,n){const d=new Date(s+'T12:00:00Z');d.setUTCDate(d.getUTCDate(
 function listTabs(){if(!M)return[];const t=M.today_warsaw,now=M.now_ts,L=M.matches,pre=L.filter(m=>m.mode!='live');
 const T=[['live','Live',L.filter(m=>m.mode=='live')],['h1','Za 1 godz.',pre.filter(m=>m.ts-now<=36e5)],['h3','Za 3 godz.',pre.filter(m=>m.ts-now<=108e5)],['d0','Dziś',pre.filter(m=>m.day_warsaw==t)],['d1','Jutro',pre.filter(m=>m.day_warsaw==addDay(t,1))]];
 for(let i=2;i<7;i++){const d=addDay(t,i),dd=new Date(d+'T12:00:00Z');T.push(['d'+i,DN[dd.getUTCDay()]+' '+d.slice(8)+'.'+d.slice(5,7),pre.filter(m=>m.day_warsaw==d)])}return T}
-function drawTabs(){const el=$('#tabs');if(view=='vip'||view=='pro'){el.innerHTML='';return}if(view=='worst'){el.innerHTML='';return}if(view=='list'){el.innerHTML=listTabs().map(([k,n,a])=>`<button data-t="${k}" class="${k==tab?'on':''}">${n}<span class="cnt">${a.length}</span></button>`).join('')}
+function drawTabs(){const el=$('#tabs');if(view=='vip'||view=='pro'){el.innerHTML='';return}if(view=='worst'||view=='next'){el.innerHTML='';return}if(view=='list'){el.innerHTML=listTabs().map(([k,n,a])=>`<button data-t="${k}" class="${k==tab?'on':''}">${n}<span class="cnt">${a.length}</span></button>`).join('')}
 else el.innerHTML=[['live','Live'],['prematch','Przedmeczowe (dziś)'],['all','Wszystkie']].map(([k,n])=>`<button data-r="${k}" class="${k==rmode?'on':''}">${n}</button>`).join('');
 el.querySelectorAll('[data-t]').forEach(b=>b.onclick=()=>{tab=b.dataset.t;drawTabs();drawList();scrollTo(0,0)});
 el.querySelectorAll('[data-r]').forEach(b=>b.onclick=()=>{rmode=b.dataset.r;drawTabs();loadRank()})}
@@ -157,10 +159,11 @@ let rt=null;async function loadRank(){clearTimeout(rt);if(!R||R.status!='computi
 const q=new URLSearchParams({mode:rmode,min_games:$('#mg').value,odds_min:$('#omin').value.replace(',','.'),odds_max:$('#omax').value.replace(',','.')});
 try{R=await (await fetch('/api/ranking?'+q)).json();drawRank();if(R.status=='computing'&&view=='rank')rt=setTimeout(loadRank,4000)}catch(e){$('#st').innerHTML='<span class="err">Błąd: '+esc(e)+'</span>';rt=setTimeout(loadRank,5000)}}
 document.querySelectorAll('[data-v]').forEach(b=>b.onclick=()=>{view=b.dataset.v;document.querySelectorAll('[data-v]').forEach(x=>x.classList.toggle('on',x==b));
-$('#list').hidden=view!='list';$('#rank').hidden=view!='rank';$('#vip').hidden=view!='vip';$('#pro').hidden=view!='pro';$('#worst').hidden=view!='worst';drawTabs();if(view=='worst'){W?drawWorst():0;loadWorst()}else if(view=='pro'){P?drawPro():0;loadPro()}else if(view=='rank'){R?drawRank():loadRank()}else if(view=='vip'){V?drawVip():0;loadVip()}else if(M)status(M)});
+$('#list').hidden=view!='list';$('#rank').hidden=view!='rank';$('#vip').hidden=view!='vip';$('#pro').hidden=view!='pro';$('#worst').hidden=view!='worst';$('#next').hidden=view!='next';drawTabs();if(view=='worst'||view=='next'){W?(view=='worst'?drawWorst():drawNext()):0;loadWorst()}else if(view=='pro'){P?drawPro():0;loadPro()}else if(view=='rank'){R?drawRank():loadRank()}else if(view=='vip'){V?drawVip():0;loadVip()}else if(M)status(M)});
 ['#mg','#omin','#omax'].forEach(s=>$(s).onchange=loadRank);
 setInterval(()=>{$('#clk').textContent=new Date().toLocaleTimeString('pl-PL',{timeZone:'Europe/Warsaw',hour:'2-digit',minute:'2-digit'})},1000);
 if(location.hash=='#najslabsi'||location.hash=='#dziurawe')document.querySelector('[data-v=worst]').click();
+if(location.hash=='#nastepny')document.querySelector('[data-v=next]').click();
 if(location.hash=='#pro')document.querySelector('[data-v=pro]').click();
 if(location.hash=='#vip')document.querySelector('[data-v=vip]').click();
 if(location.hash=='#ranking')document.querySelector('[data-v=rank]').click();
@@ -233,14 +236,29 @@ el.innerHTML=`<div class="hx"><div class="hbar"><input id="hq" type="search" pla
 const i=$('#hq');i.oninput=()=>{hq=i.value;drawWorst()};if(keep){i.focus();i.setSelectionRange(i.value.length,i.value.length)}
 $('#hall').onclick=()=>{const all=a.every(r=>HO[hk(r)]);a.forEach(r=>HO[hk(r)]=!all);drawWorst()};
 el.querySelectorAll('.hc .hh').forEach(b=>b.onclick=()=>{const c=b.parentNode,k=c.dataset.k;HO[k]=!HO[k];c.classList.toggle('op',HO[k]);$('#hall').textContent=a.length&&a.every(r=>HO[hk(r)])?'Zwiń wszystko':'Rozwiń wszystko'});wstatus()}
+function drawNext(){if(!W)return;const el=$('#np');
+if(W.status=='computing'){const p=W.progress||{},pc=p.total?Math.round(100*p.done/p.total):3;el.innerHTML=`<div class="hx"><div class="pg"><i style="width:${pc}%"></i></div><div class="hfoot">Liczę formę drużyn z meczów LIVE (${p.done||0}/${p.total||'?'})…</div>${'<div class="sk"></div>'.repeat(3)}</div>`;$('#st').textContent='Liczę… ('+(p.done||0)+'/'+(p.total||'?')+')';return}
+const N=W.next_goal||{funnel:[],picks:[]},F=N.funnel||[],P=N.picks||[];
+const funnel=`<div class="nf"><h3>Lejek sit · z listy dziurawych do top 3</h3><ol>${F.map(s=>`<li>${esc(s.name)}: <b>${s.before}</b> → <b>${s.after}</b></li>`).join('')}</ol></div>`;
+const card=p=>{const L=p.live||{},hot=(p.next_goal_score||0)>=70;
+const lv=`celne ${L.on?L.on[0]+'–'+L.on[1]:'–'} · rożne ${L.cor?L.cor[0]+'–'+L.cor[1]:'–'} · groźne ${L.da?L.da[0]+'–'+L.da[1]:'–'}`;
+const stan=p.leaky_gf!=null?`${p.leaky_gf}:${p.rival_gf} (dziurawa:rywal)`:esc(p.score||'');
+return `<div class="nc${hot?' hot':''}"><div class="meta"><span>${esc([p.category,p.tournament].filter(Boolean).join(' · '))}</span><span>● ${p.minutes!=null?esc(p.minutes)+"'":'LIVE'}</span><span>${stan}</span></div>
+<div style="margin-top:6px;font-size:13px"><b>${esc(p.team)}</b> <span class="nd">(dziurawa)</span> vs <b>${esc(p.opponent)}</b></div>
+<div class="tip">🎯 ${esc(p.tip)}</div>
+<div class="kv"><div><b>${p.next_goal_score}</b><small>next_goal_score</small></div><div><b>${p.pressure}%</b><small>presja LIVE</small></div><div><b>${p.temp??'–'}</b><small>temp. obrony${p.shots?'':' · bez strzałów'}</small></div><div><b>${p.gf_avg==null?'–':String(p.gf_avg).replace('.',',')}</b><small>gole rywala/mecz</small></div></div>
+<div class="hn" style="margin-top:8px">LIVE [dziurawa, rywal]: ${lv}</div></div>`};
+el.innerHTML=`<div class="hx">${funnel}${P.length?P.map(card).join(''):'<div class="empty"><b>Puste top 3 – to zamierzone.</b><br>Żadna drużyna nie przeszła wszystkich sit. Lepiej pusto niż słabe typy.</div>'}
+<div class="hfoot"><b>Forma + presja teraz, nie gwarancja.</b> Brak kolejnego gola do końca meczu = pudło na tym rynku.<br>Dziurawe obrony bez zmian – ta zakładka tylko filtruje ich listę.</div></div>`;
+wstatus()}
 let WT=0,WB=false;
 const hms=s=>(s||'').slice(11,19);
-function wstatus(){if(!W||W.status!='ready'||view!='worst')return;const ago=(Date.now()-WT)/1000,lage=W.live_warsaw?ago:(W.age_seconds||0)+ago,rage=(W.age_seconds||0)+ago,old=lage>180||rage>300,e=Object.entries(W.errors||{});
+function wstatus(){if(!W||W.status!='ready'||(view!='worst'&&view!='next'))return;const ago=(Date.now()-WT)/1000,lage=W.live_warsaw?ago:(W.age_seconds||0)+ago,rage=(W.age_seconds||0)+ago,old=lage>180||rage>300,e=Object.entries(W.errors||{});
 $('#st').innerHTML=`Aktualizacja: ${hms(W.live_warsaw||W.generated_warsaw)} (czas Warszawy) · ranking: ${hms(W.generated_warsaw)}`+(old?` <span class="err">⚠ dane starsze niż ${Math.floor(Math.max(lage,rage>300?rage:0)/60)} min</span>`:'')+(WB?' · odświeżam…':'')+(e.length?`<div class="err">Błąd źródła (pokazuję ostatni cache): ${esc(e.map(x=>x.join(': ')).join('; '))}</div>`:'')}
 setInterval(wstatus,5000);
 async function loadWorst(){clearTimeout(wt);WB=true;wstatus();const ac=new AbortController(),to=setTimeout(()=>ac.abort(),25000);
-try{const d=await (await fetch('/api/worst?_='+Date.now(),{cache:'no-store',signal:ac.signal})).json();if(d.status=='ready'||!W||W.status!='ready'){W=d;WT=Date.now();drawWorst()}}catch(e){$('#st').innerHTML='<span class="err">Błąd: '+esc(e)+' – ponawiam</span>'}
-clearTimeout(to);WB=false;wstatus();if(view=='worst')wt=setTimeout(loadWorst,W&&W.status=='computing'?4000:60000)}
-document.addEventListener('visibilitychange',()=>{if(!document.hidden&&view=='worst'&&(Date.now()-WT)>30000)loadWorst()});
-window.addEventListener('focus',()=>{if(view=='worst'&&(Date.now()-WT)>30000)loadWorst()});
+try{const d=await (await fetch('/api/worst?_='+Date.now(),{cache:'no-store',signal:ac.signal})).json();if(d.status=='ready'||!W||W.status!='ready'){W=d;WT=Date.now();if(view=='next')drawNext();else drawWorst()}}catch(e){$('#st').innerHTML='<span class="err">Błąd: '+esc(e)+' – ponawiam</span>'}
+clearTimeout(to);WB=false;wstatus();if(view=='worst'||view=='next')wt=setTimeout(loadWorst,W&&W.status=='computing'?4000:60000)}
+document.addEventListener('visibilitychange',()=>{if(!document.hidden&&(view=='worst'||view=='next')&&(Date.now()-WT)>30000)loadWorst()});
+window.addEventListener('focus',()=>{if((view=='worst'||view=='next')&&(Date.now()-WT)>30000)loadWorst()});
 </script></body></html>

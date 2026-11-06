@@ -5,6 +5,7 @@ Tylko biblioteka standardowa Pythona 3.9+. Uruchom: python app.py -> http://loca
 Źródła: Superbet PL (lista meczów, kursy 1X2), Sportradar gismo (statystyki). Bez kluczy i logowania."""
 import json, os, sys, time, threading, urllib.request, urllib.parse, webbrowser
 from concurrent.futures import ThreadPoolExecutor
+import next_goal
 from datetime import datetime, timedelta, timezone
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 
@@ -1300,7 +1301,8 @@ def holes(progress=None):
                        "no_shots": sum(1 for r in lst if not r["t"]["shots"])},
             "footer": {"live_matches": len(evs), "without_betradar": sum(1 for k, _ in res if k == "nobr"),
                        "without_stats": sum(1 for k, _ in res if k == "nostats")},
-            "rule": WORST_RULE, "chance_rule": CHANCE_RULE, "note": "Statystyki z ostatnich 5 meczów – forma, nie gwarancja"}
+            "rule": WORST_RULE, "chance_rule": CHANCE_RULE, "note": "Statystyki z ostatnich 5 meczów – forma, nie gwarancja",
+            "next_goal": next_goal.build_next_goal(lst)}
 
 WORST_TTL = 120
 WORST_STATE = {"res": None, "t": 0, "job": None}
@@ -1333,7 +1335,10 @@ def worst_overlay(res, live_evs, now_utc=None):
             r = dict(r); r["minutes"], r["score"] = e.get("minutes"), e.get("score"); lst.append(r)
         lst = holes_sections(lst)
         out["list"] = lst; out["sections"] = section_counts(lst)
+        out["next_goal"] = next_goal.build_next_goal(lst)
         out["live_warsaw"] = to_warsaw(now_utc).strftime("%Y-%m-%d %H:%M:%S")
+    elif res.get("list") is not None and "next_goal" not in out:
+        out["next_goal"] = next_goal.build_next_goal(res.get("list"))
     return out
 
 def get_worst(mode="all"):

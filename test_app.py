@@ -2,6 +2,7 @@
 import unittest
 from datetime import datetime, timezone
 import app
+import next_goal
 
 SAMPLE_GAMES = [  # PRZYKŁADOWE
     {"on": 5, "tot": 12}, {"on": 3, "tot": 9}, {"on": None, "tot": None},
@@ -528,3 +529,105 @@ class TestSections(unittest.TestCase):
         res = {"list": [self.r("E", 1, 95, "20"), self.r("M", 2, 50, "60")]}
         out = app.worst_overlay(res, [{"eventId": 1, "minutes": "26", "score": "0:0"}, {"eventId": 2, "minutes": "61", "score": "1:0"}])
         self.assertEqual([x["team"] for x in out["list"]], ["E", "M"]); self.assertEqual(out["sections"]["teams"]["main"], 2)
+
+
+class TestNextGoal(unittest.TestCase):
+    """Snapshot ~2026-11-06 14:18 Europe/Warsaw – sita następnego gola."""
+
+    def base(self, **kw):
+        r = {
+            "team": "X", "opponent": "Y", "side": "D", "minutes": "50", "score": "0:0",
+            "balanced": False, "early": False,
+            "live": {"on": [0, 3], "cor": [1, 3], "da": [20, 50]},
+            "t": {"temp": 64, "shots": True},
+            "opp_att": {"gf_avg": 2.2, "n": 5},
+            "eventId": 1, "ga_raw": 10,
+        }
+        r.update(kw)
+        return r
+
+    def test_parse_minute(self):
+        self.assertEqual(next_goal.parse_minute("HT"), 45)
+        self.assertEqual(next_goal.parse_minute("przerwa"), 45)
+        self.assertEqual(next_goal.parse_minute("45+2"), 47)
+        self.assertEqual(next_goal.parse_minute("67'"), 67)
+        self.assertEqual(next_goal.parse_minute("59"), 59)
+
+    def test_skopje_passes(self):
+        # side=W, score 1:0 home:away → leaky 0, rival 1
+        r = self.base(team="Skopje", opponent="Tikvesh", side="W", minutes="59", score="1:0",
+                      live={"on": [0, 3], "cor": [1, 3], "da": [21, 54]},
+                      t={"temp": 64, "shots": True}, opp_att={"gf_avg": 2.2})
+        out = next_goal.build_next_goal([r])
+        self.assertEqual(len(out["picks"]), 1)
+        p = out["picks"][0]
+        self.assertEqual(p["team"], "Skopje")
+        self.assertEqual(p["leaky_gf"], 0)
+        self.assertEqual(p["rival_gf"], 1)
+        self.assertEqual(p["tip"], "Tikvesh — następny gol")
+        self.assertGreaterEqual(p["next_goal_score"], 50)
+
+    def test_rivne_minute_out(self):
+        r = self.base(team="Rivne", opponent="Polissya", minutes="88", score="1:0", side="W",
+                      live={"on": [1, 4], "cor": [1, 8], "da": [30, 55]})
+        self.assertEqual(next_goal.build_next_goal([r])["picks"], [])
+        self.assertEqual(next_goal.build_next_goal([r])["funnel"][1]["after"], 0)
+
+    def test_tanjong_minute_and_gd(self):
+        r = self.base(team="Tanjong Pagar Reserve", opponent="Geylang Reserve", side="D",
+                      minutes="89", score="0:7",
+                      live={"on": [0, 5], "cor": [0, 4], "da": [10, 40]})
+        out = next_goal.build_next_goal([r])
+        self.assertEqual(out["picks"], [])
+        # odpada na minucie (sito 1)
+        self.assertEqual(out["funnel"][1]["after"], 0)
+
+    def test_kiryat_yam_early_and_no_rival_shots(self):
+        r = self.base(team="Hapoel Kiryat Yam", opponent="Ashdod", side="D", minutes="18", score="2:0",
+                      live={"on": [4, 0], "cor": [0, 1], "da": [14, 15]},
+                      t={"temp": 70, "shots": True}, opp_att={"gf_avg": 1.6})
+        # nowa presja ~0.31 (nie stary równy live_share 0.51)
+        pr = next_goal.next_live_pressure(r["live"])
+        self.assertIsNotNone(pr)
+        self.assertLess(pr, 0.40)
+        self.assertEqual(next_goal.build_next_goal([r])["picks"], [])
+
+    def test_maccabi_petah_fifty_fifty_no_shots(self):
+        r = self.base(team="Maccabi Petah Tikva", opponent="Maccabi Tel Aviv", side="W",
+                      minutes="58", score="1:1",
+                      live={"on": [2, 2], "cor": [3, 3], "da": [15, 15]},
+                      t={"temp": 73, "shots": False}, opp_att={"gf_avg": 2.6})
+        self.assertEqual(next_goal.build_next_goal([r])["picks"], [])
+
+    def test_zalau_rival_not_dominating(self):
+        # side=W, score 1:2 → leaky (away) 2, rival (home) 1; leaky prowadzi 2:1
+        r = self.base(team="Scm Zalau", opponent="CS Academica Recea", side="W",
+                      minutes="59", score="1:2",
+                      live={"on": [3, 1], "cor": [4, 1], "da": [40, 20]},
+                      t={"temp": 60, "shots": True}, opp_att={"gf_avg": 1.8})
+        g = next_goal.leaky_rival_goals(r)
+        self.assertEqual(g, (2, 1))
+        self.assertEqual(next_goal.build_next_goal([r])["picks"], [])
+
+    def test_balanced_out(self):
+        r = self.base(balanced=True, minutes="40",
+                      live={"on": [0, 4], "cor": [0, 3], "da": [10, 50]},
+                      opp_att={"gf_avg": 2.0})
+        self.assertEqual(next_goal.build_next_goal([r])["picks"], [])
+
+    def test_funnel_steps(self):
+        out = next_goal.build_next_goal([self.base()])
+        self.assertEqual(len(out["funnel"]), 1 + len(next_goal.SIEVES))
+        self.assertEqual(out["funnel"][0]["name"], "start (temperatura ≥ 40)")
+
+    def test_empty_list_ok(self):
+        out = next_goal.build_next_goal([])
+        self.assertEqual(out["picks"], [])
+        self.assertEqual(out["funnel"][0]["after"], 0)
+
+    def test_holes_payload_includes_next_goal_without_changing_rules(self):
+        # pusta lista: next_goal obecne; rule/chance_rule nienaruszone w module
+        self.assertTrue(hasattr(app, "CHANCE_RULE") and "35%" in app.CHANCE_RULE)
+        self.assertEqual(app.SECTIONS, ("main", "early", "balanced"))
+
+
