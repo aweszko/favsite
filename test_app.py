@@ -378,9 +378,6 @@ class TestChance(unittest.TestCase):
         r = app.holes_rank([mk("SanMartin", 95, 20), mk("B", 60, 70), mk("C", 80, 70), mk("D", 30, 99)])
         self.assertEqual([x["team"] for x in r], ["C", "B", "SanMartin"])
 
-if __name__ == "__main__":
-    unittest.main()
-
 
 class TestWorst(unittest.TestCase):
     def g(self, gf, ga, on=3, tot=10, on_a=4, tot_a=12):
@@ -589,7 +586,7 @@ class TestNextGoal(unittest.TestCase):
         # nowa presja ~0.31 (nie stary równy live_share 0.51)
         pr = next_goal.next_live_pressure(r["live"])
         self.assertIsNotNone(pr)
-        self.assertLess(pr, 0.40)
+        self.assertLess(pr["share"], 0.40)
         self.assertEqual(next_goal.build_next_goal([r])["picks"], [])
 
     def test_maccabi_petah_fifty_fifty_no_shots(self):
@@ -631,3 +628,110 @@ class TestNextGoal(unittest.TestCase):
         self.assertEqual(app.SECTIONS, ("main", "early", "balanced"))
 
 
+class TestNextGoalTips(unittest.TestCase):
+    def setUp(self):
+        import tempfile, os
+        self.tmp = tempfile.mkdtemp()
+        self.old_log, self.old_les = app.NG_LOG_PATH, app.NG_LESSONS_PATH
+        app.NG_LOG_PATH = os.path.join(self.tmp, "ng.json")
+        app.NG_LESSONS_PATH = os.path.join(self.tmp, "les.json")
+        with app.NG_LOCK:
+            self.backup_log = list(app.NG_LOG); self.backup_les = list(app.NG_LESSONS)
+            app.NG_LOG[:] = []; app.NG_LESSONS[:] = []
+    def tearDown(self):
+        with app.NG_LOCK:
+            app.NG_LOG[:] = self.backup_log; app.NG_LESSONS[:] = self.backup_les
+        app.NG_LOG_PATH, app.NG_LESSONS_PATH = self.old_log, self.old_les
+
+    def pick(self, **kw):
+        p = {
+            "eventId": 101, "betradarId": "br1", "team": "Skopje", "opponent": "Tikvesh",
+            "side": "W", "minutes": "59", "score": "1:0", "leaky_gf": 0, "rival_gf": 1, "rywal_gd": 1,
+            "live": {"on": [0, 3], "cor": [1, 3], "da": [21, 54]}, "pressure": 88, "pressure_share": 0.88,
+            "pressure_parts": {"on": 1.0, "da": 0.72, "cor": 0.75}, "temp": 64, "shots": True, "gf_avg": 2.2,
+            "next_goal_score": 80, "score_parts": [{"name": "presja", "weight": 50, "value": 88}],
+            "sieves_passed": ["minuta 25–75"], "tip": "Tikvesh — następny gol", "balanced": False,
+            "tournament": "1. MFL", "category": "Macedonia",
+        }
+        p.update(kw); return p
+
+    def test_place_tip_snapshot_and_no_duplicate(self):
+        r = app.ng_place_tip(self.pick())
+        self.assertTrue(r["ok"]); e = r["entry"]
+        self.assertEqual(e["status"], "pending")
+        self.assertEqual(e["eventId"], 101)
+        self.assertEqual(e["score_h"], 1); self.assertEqual(e["score_a"], 0)
+        self.assertEqual(e["leaky_gf"], 0); self.assertEqual(e["rival_gf"], 1)
+        self.assertEqual(e["live"]["on"], [0, 3])
+        self.assertIsNotNone(e["time_warsaw"])
+        self.assertFalse(e["balanced"])
+        r2 = app.ng_place_tip(self.pick())
+        self.assertFalse(r2["ok"]); self.assertIn("aktywny", r2["error"])
+
+    def test_settle_rival_goal_win(self):
+        e = next_goal.snapshot_from_pick(self.pick(), "2026-11-06 14:00:00")
+        tl = {"match": {"result": {"home": 2, "away": 0}, "status": {"_id": 100}},
+              "events": [{"type": "goal", "time": 70, "team": "home", "result": {"home": 2, "away": 0}}]}
+        # tip side W → leaky=away, rival=home; home scores → win
+        r = next_goal.settle_tip(e, tl)
+        self.assertEqual(r["status"], "win"); self.assertEqual(r["goal_minute"], 70)
+
+    def test_settle_leaky_goal_loss(self):
+        e = next_goal.snapshot_from_pick(self.pick(), "t")
+        tl = {"match": {"result": {"home": 1, "away": 1}, "status": {"_id": 100}},
+              "events": [{"type": "goal", "time": 66, "team": "away", "result": {"home": 1, "away": 1}}]}
+        r = next_goal.settle_tip(e, tl)
+        self.assertEqual(r["status"], "loss"); self.assertEqual(r["goal_minute"], 66)
+
+    def test_settle_no_goal_ft_loss(self):
+        e = next_goal.snapshot_from_pick(self.pick(), "t")
+        tl = {"match": {"result": {"home": 1, "away": 0}, "status": {"_id": 100}}, "events": []}
+        r = next_goal.settle_tip(e, tl)
+        self.assertEqual(r["status"], "loss"); self.assertTrue(r.get("no_goal"))
+
+    def test_settle_ignores_goal_before_tip_minute(self):
+        e = next_goal.snapshot_from_pick(self.pick(minutes="59", score="1:0"), "t")
+        # gol w 50' ignorowany; mecz trwa bez późniejszego gola → pending
+        tl = {"match": {"result": {"home": 1, "away": 0}, "status": {"_id": 0}},
+              "events": [{"type": "goal", "time": 50, "team": "home", "result": {"home": 1, "away": 0}}]}
+        r = next_goal.settle_tip(e, tl)
+        self.assertTrue(r.get("pending"))
+
+    def test_analysis_has_cause(self):
+        e = next_goal.snapshot_from_pick(self.pick(), "t")
+        st = {"status": "loss", "no_goal": True, "final": "1:0", "goal_minute": None, "goal_side": None}
+        an = next_goal.analyze_tip(e, st)
+        self.assertEqual(an["C_cause"]["code"], "no_goal")
+        self.assertIn("A_snapshot", an); self.assertIn("D_counterfactual", an)
+
+    def test_insights_no_lessons_under_15(self):
+        log = []
+        for i in range(10):
+            e = next_goal.snapshot_from_pick(self.pick(eventId=i, minutes="55"), "t")
+            e["status"] = "win" if i % 2 == 0 else "loss"
+            e["cause"] = {"code": "win" if e["status"] == "win" else "no_goal"}
+            log.append(e)
+        ins = next_goal.aggregate_insights(log)
+        self.assertTrue(ins["sample_too_small"]); self.assertEqual(ins["lessons"], [])
+
+    def test_insights_lessons_when_enough(self):
+        log = []
+        # 16 settled, bucket minuta_60-75 with 8 losses → rate 0 < 35%
+        for i in range(16):
+            e = next_goal.snapshot_from_pick(self.pick(eventId=i, minutes="70", score="0:1", side="D",
+                                                       leaky_gf=0, rival_gf=1, rywal_gd=1), "t")
+            # fix snapshot fields after override
+            e["minute"] = 70; e["rywal_gd"] = 1; e["pressure_share"] = 0.7; e["shots"] = True
+            e["status"] = "loss"; e["cause"] = {"code": "no_goal"}; e["no_goal"] = True
+            log.append(e)
+        ins = next_goal.aggregate_insights(log)
+        self.assertFalse(ins["sample_too_small"])
+        self.assertTrue(any(L["bucket"] == "minuta_60-75" and L["delta"] < 0 for L in ins["lessons"]))
+
+    def test_html_has_typoj_and_hash(self):
+        self.assertIn("Typuj", app.HTML); self.assertIn("#nastepny", app.HTML)
+        self.assertIn("Historia typów", app.HTML); self.assertIn("Wnioski", app.HTML)
+
+
+if __name__ == "__main__":
+    unittest.main()

@@ -238,18 +238,41 @@ $('#hall').onclick=()=>{const all=a.every(r=>HO[hk(r)]);a.forEach(r=>HO[hk(r)]=!
 el.querySelectorAll('.hc .hh').forEach(b=>b.onclick=()=>{const c=b.parentNode,k=c.dataset.k;HO[k]=!HO[k];c.classList.toggle('op',HO[k]);$('#hall').textContent=a.length&&a.every(r=>HO[hk(r)])?'Zwiń wszystko':'Rozwiń wszystko'});wstatus()}
 function drawNext(){if(!W)return;const el=$('#np');
 if(W.status=='computing'){const p=W.progress||{},pc=p.total?Math.round(100*p.done/p.total):3;el.innerHTML=`<div class="hx"><div class="pg"><i style="width:${pc}%"></i></div><div class="hfoot">Liczę formę drużyn z meczów LIVE (${p.done||0}/${p.total||'?'})…</div>${'<div class="sk"></div>'.repeat(3)}</div>`;$('#st').textContent='Liczę… ('+(p.done||0)+'/'+(p.total||'?')+')';return}
-const N=W.next_goal||{funnel:[],picks:[]},F=N.funnel||[],P=N.picks||[];
+const N=W.next_goal||{funnel:[],picks:[],history:[],insights:{},learning:{}},F=N.funnel||[],P=N.picks||[],H=N.history||[],I=N.insights||{},L=N.learning||{};
+window._ngPicks=P;window._ngHist=H;
+const stLab={pending:'oczekuje',win:'wygrana',loss:'przegrana'};
 const funnel=`<div class="nf"><h3>Lejek sit · z listy dziurawych do top 3</h3><ol>${F.map(s=>`<li>${esc(s.name)}: <b>${s.before}</b> → <b>${s.after}</b></li>`).join('')}</ol></div>`;
-const card=p=>{const L=p.live||{},hot=(p.next_goal_score||0)>=70;
-const lv=`celne ${L.on?L.on[0]+'–'+L.on[1]:'–'} · rożne ${L.cor?L.cor[0]+'–'+L.cor[1]:'–'} · groźne ${L.da?L.da[0]+'–'+L.da[1]:'–'}`;
+const card=(p,i)=>{const Lv=p.live||{},hot=(p.next_goal_score||0)>=70;
+const lv=`celne ${Lv.on?Lv.on[0]+'–'+Lv.on[1]:'–'} · rożne ${Lv.cor?Lv.cor[0]+'–'+Lv.cor[1]:'–'} · groźne ${Lv.da?Lv.da[0]+'–'+Lv.da[1]:'–'}`;
 const stan=p.leaky_gf!=null?`${p.leaky_gf}:${p.rival_gf} (dziurawa:rywal)`:esc(p.score||'');
+const btn=p.already_tipped?`<button class="tg" disabled>Już typujesz ten mecz</button>`:`<button class="tg ng-tip" data-i="${i}">Typuj</button>`;
 return `<div class="nc${hot?' hot':''}"><div class="meta"><span>${esc([p.category,p.tournament].filter(Boolean).join(' · '))}</span><span>● ${p.minutes!=null?esc(p.minutes)+"'":'LIVE'}</span><span>${stan}</span></div>
 <div style="margin-top:6px;font-size:13px"><b>${esc(p.team)}</b> <span class="nd">(dziurawa)</span> vs <b>${esc(p.opponent)}</b></div>
 <div class="tip">🎯 ${esc(p.tip)}</div>
-<div class="kv"><div><b>${p.next_goal_score}</b><small>next_goal_score</small></div><div><b>${p.pressure}%</b><small>presja LIVE</small></div><div><b>${p.temp??'–'}</b><small>temp. obrony${p.shots?'':' · bez strzałów'}</small></div><div><b>${p.gf_avg==null?'–':String(p.gf_avg).replace('.',',')}</b><small>gole rywala/mecz</small></div></div>
-<div class="hn" style="margin-top:8px">LIVE [dziurawa, rywal]: ${lv}</div></div>`};
-el.innerHTML=`<div class="hx">${funnel}${P.length?P.map(card).join(''):'<div class="empty"><b>Puste top 3 – to zamierzone.</b><br>Żadna drużyna nie przeszła wszystkich sit. Lepiej pusto niż słabe typy.</div>'}
-<div class="hfoot"><b>Forma + presja teraz, nie gwarancja.</b> Brak kolejnego gola do końca meczu = pudło na tym rynku.<br>Dziurawe obrony bez zmian – ta zakładka tylko filtruje ich listę.</div></div>`;
+<div class="kv"><div><b>${p.next_goal_score}</b><small>next_goal_score${p.learning_delta?` (${p.learning_delta>0?'+':''}${p.learning_delta} nauka)`:''}</small></div><div><b>${p.pressure}%</b><small>presja LIVE</small></div><div><b>${p.temp??'–'}</b><small>temp. obrony${p.shots?'':' · bez strzałów'}</small></div><div><b>${p.gf_avg==null?'–':String(p.gf_avg).replace('.',',')}</b><small>gole rywala/mecz</small></div></div>
+<div class="hn" style="margin-top:8px">LIVE [dziurawa, rywal]: ${lv}</div>
+<div style="margin-top:10px">${btn}</div></div>`};
+const hist=H.length?`<div class="nf"><h3>Historia typów (W/P)</h3>${H.map(h=>`<div class="wl" style="cursor:pointer" data-tid="${esc(h.id)}"><b>${esc(h.time_warsaw||'')}</b> · ${esc(h.match||'')} · <b>${esc(h.tip||h.opponent||'')}</b><br><small>przy typie: ${h.minute!=null?h.minute+"'":'?'} ${esc(h.score||'')} · <b>${esc(stLab[h.status]||h.status)}</b>${h.goal_minute!=null?' · gol '+h.goal_minute+"'":''}${h.final?' · końcowy '+esc(h.final):''}</small></div>`).join('')}</div>`:'<div class="nf"><h3>Historia typów</h3><div class="empty">Brak typów – kliknij „Typuj” na karcie top 3.</div></div>';
+const wn=`<div class="nf"><h3>Wnioski</h3>${(I.texts||[]).map(x=>`<div class="hn">• ${esc(x)}</div>`).join('')||'<div class="hn">Brak rozliczonych typów.</div>'}
+<div class="hn" style="margin-top:8px">${esc(L.note||'')}${(L.lessons||[]).length?'<br>Aktywne lekcje: '+L.lessons.map(x=>esc(x.bucket)+' '+(x.delta>0?'+':'')+x.delta+' (n='+x.n+')').join('; '):''}</div>
+<div class="hn">${N.persist_working?'Rejestr typów jest w prywatnym giscie (przeżywa restart).':N.persistent?'Gist skonfigurowany, ale zapis chwilowo nie działa – lokalny cache do restartu.':'Brak GIST_TOKEN/GIST_ID – rejestr zeruje się po restarcie.'}</div></div>`;
+el.innerHTML=`<div class="hx">${funnel}${P.length?P.map(card).join(''):'<div class="empty"><b>Puste top 3 – to zamierzone.</b><br>Żadna drużyna nie przeszła wszystkich sit. Lepiej pusto niż słabe typy.</div>'}${hist}${wn}
+<div id="ngd"></div>
+<div class="hfoot"><b>Forma + presja teraz, nie gwarancja.</b> Brak kolejnego gola do końca = pudło. Twarde sita nie są rozluźniane przez naukę.</div></div>`;
+el.querySelectorAll('.ng-tip').forEach(b=>b.onclick=async()=>{const pick=window._ngPicks[+b.dataset.i];if(!pick)return;
+b.disabled=true;b.textContent='Zapisuję…';
+try{const r=await(await fetch('/api/next-goal/tip',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(pick)})).json();
+if(!r.ok){alert(r.error||'Nie zapisano');b.disabled=false;b.textContent='Typuj';return}
+await loadWorst()}catch(e){alert('Błąd: '+e);b.disabled=false;b.textContent='Typuj'}});
+el.querySelectorAll('[data-tid]').forEach(row=>row.onclick=async()=>{const id=row.dataset.tid;const box=$('#ngd');box.innerHTML='<div class="empty">Ładuję analizę…</div>';
+try{const d=await(await fetch('/api/next-goal/tip/'+encodeURIComponent(id))).json();
+const a=d.analysis||{},e=d.entry||{};
+box.innerHTML=`<div class="nf"><h3>Analiza typu · ${esc(e.tip||'')}</h3>
+<div class="hn"><b>A. W chwili typowania</b><br>${esc(a.A_snapshot||'')}</div>
+<div class="hn" style="margin-top:8px"><b>B. Co się stało</b><br>${esc(a.B_outcome||'')}</div>
+<div class="hn" style="margin-top:8px"><b>C. Dlaczego</b><br>${esc((a.C_cause&&a.C_cause.text)||'')}</div>
+<div class="hn" style="margin-top:8px"><b>D. Kontrfakt</b><br>${esc(a.D_counterfactual||'')}</div>
+<button class="tg" style="margin-top:10px" onclick="$('#ngd').innerHTML=''">Zamknij</button></div>`}catch(err){box.innerHTML='<div class="empty err">Błąd analizy: '+esc(err)+'</div>'}});
 wstatus()}
 let WT=0,WB=false;
 const hms=s=>(s||'').slice(11,19);

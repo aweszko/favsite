@@ -694,6 +694,11 @@ def streaks(results):
 
 GIST_API = "https://api.github.com/gists/"
 GIST_FILE = "pro_log.json"
+NG_GIST_FILE = "next_goal_log.json"
+NG_LESSONS_FILE = "next_goal_lessons.json"
+NG_LOG_PATH = os.environ.get("NG_LOG", os.path.join(os.path.dirname(os.path.abspath(__file__)), "next_goal_log.json"))
+NG_LESSONS_PATH = os.environ.get("NG_LESSONS", os.path.join(os.path.dirname(os.path.abspath(__file__)), "next_goal_lessons.json"))
+NG_LOCK = threading.Lock()
 GIST_MIN_INTERVAL = 30
 GIST_STATE = {"last": 0.0, "dirty": False, "timer": None, "ok": None, "err": None}
 GIST_SLOCK = threading.Lock()
@@ -726,18 +731,26 @@ def _gist_err(e):
     ERRORS.pop("gist", None)   # błąd gista nie jest błędem źródła danych - nie pokazujemy go użytkownikowi
     print("[gist] błąd: " + msg, file=sys.stderr)
 
-def gist_load():
+def _gist_file_content(d, name, token):
+    f = (d.get("files") or {}).get(name) or {}
+    content = f.get("content")
+    if f.get("truncated") and f.get("raw_url"):
+        rq = urllib.request.Request(f["raw_url"], headers={"Authorization": "Bearer " + token, "User-Agent": "triumfator"})
+        with urllib.request.urlopen(rq, timeout=8) as r: content = r.read().decode("utf-8")
+    return content
+
+def gist_load(file_name=None):
     cfg = gist_cfg()
     if not cfg or not persist_active(): return None
+    name = file_name or GIST_FILE
     try:
         st, d = _gist_http("GET", cfg[1], cfg[0])
-        f = (d.get("files") or {}).get(GIST_FILE) or {}
-        content = f.get("content")
-        if f.get("truncated") and f.get("raw_url"):
-            rq = urllib.request.Request(f["raw_url"], headers={"Authorization": "Bearer " + cfg[0], "User-Agent": "triumfator"})
-            with urllib.request.urlopen(rq, timeout=8) as r: content = r.read().decode("utf-8")
-        log = json.loads(content or "[]")
-        if not isinstance(log, list): raise ValueError("bad log")
+        content = _gist_file_content(d, name, cfg[0])
+        log = json.loads(content or ("[]" if name != NG_LESSONS_FILE else "[]"))
+        if name == NG_LESSONS_FILE:
+            if not isinstance(log, list): raise ValueError("bad lessons")
+        elif not isinstance(log, list):
+            raise ValueError("bad log")
         GIST_STATE["ok"] = True
         return log
     except Exception as e:
@@ -749,8 +762,15 @@ def gist_push_now():
     with GIST_SLOCK:
         GIST_STATE["dirty"] = False; GIST_STATE["last"] = time.time(); GIST_STATE["timer"] = None
     try:
-        with PRO_LOCK: content = json.dumps(PRO_LOG, ensure_ascii=False)
-        _gist_http("PATCH", cfg[1], cfg[0], {"files": {GIST_FILE: {"content": content}}})
+        with PRO_LOCK: pro_content = json.dumps(PRO_LOG, ensure_ascii=False)
+        with NG_LOCK:
+            ng_content = json.dumps(NG_LOG, ensure_ascii=False)
+            lessons_content = json.dumps(NG_LESSONS, ensure_ascii=False)
+        _gist_http("PATCH", cfg[1], cfg[0], {"files": {
+            GIST_FILE: {"content": pro_content},
+            NG_GIST_FILE: {"content": ng_content},
+            NG_LESSONS_FILE: {"content": lessons_content},
+        }})
         GIST_STATE["ok"], GIST_STATE["err"] = True, None
         ERRORS.pop("gist", None)
         return True
@@ -785,6 +805,120 @@ def pro_save(log):
     except Exception as e: _gist_err(e)
 
 PRO_LOG = pro_load()
+
+def ng_load():
+    g = gist_load(NG_GIST_FILE)
+    if g is not None: return g
+    try:
+        with open(NG_LOG_PATH, encoding="utf-8") as fh: return json.load(fh)
+    except Exception: return []
+
+def ng_lessons_load():
+    g = gist_load(NG_LESSONS_FILE)
+    if g is not None: return g
+    try:
+        with open(NG_LESSONS_PATH, encoding="utf-8") as fh: return json.load(fh)
+    except Exception: return []
+
+def ng_save(log=None, lessons=None):
+    try:
+        if log is not None:
+            tmp = NG_LOG_PATH + ".tmp"
+            with open(tmp, "w", encoding="utf-8") as fh: json.dump(log, fh, ensure_ascii=False)
+            os.replace(tmp, NG_LOG_PATH)
+        if lessons is not None:
+            tmp = NG_LESSONS_PATH + ".tmp"
+            with open(tmp, "w", encoding="utf-8") as fh: json.dump(lessons, fh, ensure_ascii=False)
+            os.replace(tmp, NG_LESSONS_PATH)
+    except Exception as e: ERRORS["ng_rejestr"] = "%s: %s" % (type(e).__name__, e)
+    try: gist_schedule()
+    except Exception as e: _gist_err(e)
+
+NG_LOG = ng_load()
+NG_LESSONS = ng_lessons_load()
+
+def ng_attach(lst):
+    """Picks+funnel+history+insights+learning na bazie listy dziurawych."""
+    with NG_LOCK: lessons = list(NG_LESSONS); log = [dict(e) for e in NG_LOG]
+    built = next_goal.build_next_goal(lst, lessons=lessons)
+    insights = next_goal.aggregate_insights(log)
+    # odśwież lekcje gdy próba wystarczająca
+    if insights.get("lessons") is not None and not insights.get("sample_too_small"):
+        with NG_LOCK:
+            if insights["lessons"] != NG_LESSONS:
+                NG_LESSONS[:] = insights["lessons"]
+                ng_save(lessons=list(NG_LESSONS))
+                lessons = list(NG_LESSONS)
+                built = next_goal.build_next_goal(lst, lessons=lessons)
+    pending_ids = {e.get("eventId") for e in log if e.get("status") == "pending"}
+    for p in built["picks"]:
+        p["already_tipped"] = p.get("eventId") in pending_ids
+    return {
+        "funnel": built["funnel"], "picks": built["picks"],
+        "history": next_goal.history_view(log),
+        "insights": {"texts": insights["texts"], "settled": insights["settled"], "wins": insights["wins"],
+                     "losses": insights["losses"], "pending": insights["pending"], "hit_rate": insights["hit_rate"],
+                     "buckets": insights["buckets"], "sample_too_small": insights["sample_too_small"]},
+        "learning": {"lessons": lessons, "applied": bool(lessons),
+                     "note": ("Korekty scoringu aktywne (nie sit)." if lessons else
+                              ("Próba < %d – bez korekt wag." % next_goal.LEARN_MIN_SETTLED))},
+        "persistent": persist_active(),
+        "persist_working": persist_working(),
+    }
+
+def ng_settle_pending():
+    now = datetime.now(timezone.utc); now_ts = int(now.timestamp())
+    with NG_LOCK: pend = [e for e in NG_LOG if e.get("status") == "pending"]
+    changed = False
+    for e in pend[:8]:
+        br = e.get("betradarId")
+        if not br: continue
+        try: tl = timeline(br, 120)
+        except Exception: tl = None
+        if not tl: continue
+        r = next_goal.settle_tip(e, tl)
+        if r.get("pending"): continue
+        an = next_goal.analyze_tip(e, r)
+        with NG_LOCK:
+            e["status"] = r["status"]; e["result"] = r.get("result")
+            e["goal_minute"] = r.get("goal_minute"); e["goal_side"] = r.get("goal_side")
+            e["owngoal"] = r.get("owngoal"); e["final"] = r.get("final")
+            e["no_goal"] = bool(r.get("no_goal"))
+            e["settled_warsaw"] = to_warsaw(now).strftime("%Y-%m-%d %H:%M:%S")
+            e["cause"] = an["C_cause"]; e["analysis"] = an
+            changed = True
+        # timeout 6h bez final -> zostaw pending (timeline może wrócić)
+    if changed:
+        with NG_LOCK:
+            insights = next_goal.aggregate_insights(NG_LOG)
+            if not insights.get("sample_too_small"):
+                NG_LESSONS[:] = insights.get("lessons") or []
+            ng_save(log=list(NG_LOG), lessons=list(NG_LESSONS))
+
+def ng_place_tip(pick):
+    """Zapis typu ze snapshotem. Jeden aktywny (pending) na eventId."""
+    if not pick or not pick.get("eventId"):
+        return {"ok": False, "error": "brak eventId"}
+    eid = pick["eventId"]
+    now = datetime.now(timezone.utc)
+    with NG_LOCK:
+        for e in NG_LOG:
+            if e.get("eventId") == eid and e.get("status") == "pending":
+                return {"ok": False, "error": "ten mecz ma już aktywny typ", "entry": e}
+        snap = next_goal.snapshot_from_pick(pick, to_warsaw(now).strftime("%Y-%m-%d %H:%M:%S"))
+        snap["id"] = "%s-%s" % (eid, int(now.timestamp()))
+        snap["ts"] = int(now.timestamp())
+        NG_LOG.append(snap)
+        del NG_LOG[:-300]
+        ng_save(log=list(NG_LOG))
+        return {"ok": True, "entry": snap}
+
+def ng_get_tip(tip_id):
+    with NG_LOCK: log = list(NG_LOG)
+    for e in log:
+        if str(e.get("id")) == str(tip_id) or str(e.get("eventId")) == str(tip_id):
+            return next_goal.detail_view(e)
+    return None
 
 def timeline(br, ttl=PRO_TL_TTL):
     return cached("tl:%s" % br, ttl, lambda: gismo("match_timeline/%s" % br))
@@ -1235,7 +1369,8 @@ def holes_event(ev, opp_cache):
         games = (tg or {}).get("games") or []
         row = {"team": mi[side]["name"] or ev.get(side), "opponent": mi[opp]["name"] or ev.get(opp), "side": "D" if side == "home" else "W",
                "uid": uid, "tournament": mi.get("tournament") or ev.get("league"), "category": mi.get("category") or ev.get("country"),
-               "minutes": ev.get("minutes"), "score": ev.get("score"), "eventId": ev["eventId"], "games_n": len(games), "t": None,
+               "minutes": ev.get("minutes"), "score": ev.get("score"), "eventId": ev["eventId"], "betradarId": ev.get("br"),
+               "games_n": len(games), "t": None,
                "stale": bool((tg or {}).get("stale")) and len(games) < 5, "_g": games, "opp_uid": mi[opp]["uid"]}
         if len(games) >= 5 and all(g["ga"] is not None and g["gf"] is not None for g in games):
             infos = []
@@ -1302,7 +1437,7 @@ def holes(progress=None):
             "footer": {"live_matches": len(evs), "without_betradar": sum(1 for k, _ in res if k == "nobr"),
                        "without_stats": sum(1 for k, _ in res if k == "nostats")},
             "rule": WORST_RULE, "chance_rule": CHANCE_RULE, "note": "Statystyki z ostatnich 5 meczów – forma, nie gwarancja",
-            "next_goal": next_goal.build_next_goal(lst)}
+            "next_goal": ng_attach(lst)}
 
 WORST_TTL = 120
 WORST_STATE = {"res": None, "t": 0, "job": None}
@@ -1335,10 +1470,12 @@ def worst_overlay(res, live_evs, now_utc=None):
             r = dict(r); r["minutes"], r["score"] = e.get("minutes"), e.get("score"); lst.append(r)
         lst = holes_sections(lst)
         out["list"] = lst; out["sections"] = section_counts(lst)
-        out["next_goal"] = next_goal.build_next_goal(lst)
+        out["next_goal"] = ng_attach(lst)
         out["live_warsaw"] = to_warsaw(now_utc).strftime("%Y-%m-%d %H:%M:%S")
-    elif res.get("list") is not None and "next_goal" not in out:
-        out["next_goal"] = next_goal.build_next_goal(res.get("list"))
+        ng_settle_pending()
+    elif res.get("list") is not None:
+        out["next_goal"] = ng_attach(res.get("list"))
+        ng_settle_pending()
     return out
 
 def get_worst(mode="all"):
@@ -1452,6 +1589,18 @@ class H(BaseHTTPRequestHandler):
         self.send_response(code); self.send_header("Content-Type", ctype)
         self.send_header("Content-Length", str(len(b))); self.send_header("Cache-Control", "no-store")
         self.end_headers(); self.wfile.write(b)
+    def do_POST(self):
+        u = urllib.parse.urlparse(self.path)
+        if u.path == "/api/next-goal/tip":
+            try:
+                n = int(self.headers.get("Content-Length") or 0)
+                body = self.rfile.read(n) if n else b"{}"
+                pick = json.loads(body.decode("utf-8") or "{}")
+                res = ng_place_tip(pick)
+                return self.send(200 if res.get("ok") else 409, json.dumps(res, ensure_ascii=False), "application/json; charset=utf-8")
+            except Exception as e:
+                return self.send(500, json.dumps({"ok": False, "error": str(e)}), "application/json")
+        return self.send(404, json.dumps({"error": "nie znaleziono"}), "application/json")
     def do_GET(self):
         u = urllib.parse.urlparse(self.path)
         if u.path in ("/", "/index.html"):
@@ -1477,6 +1626,13 @@ class H(BaseHTTPRequestHandler):
             except Exception as e: return self.send(500, json.dumps({"error": str(e)}), "application/json")
         if u.path == "/api/pro":
             try: return self.send(200, json.dumps(get_pro(), ensure_ascii=False), "application/json; charset=utf-8")
+            except Exception as e: return self.send(500, json.dumps({"error": str(e)}), "application/json")
+        if u.path.startswith("/api/next-goal/tip/"):
+            tip_id = urllib.parse.unquote(u.path[len("/api/next-goal/tip/"):])
+            try:
+                d = ng_get_tip(tip_id)
+                if not d: return self.send(404, json.dumps({"error": "nie znaleziono typu"}), "application/json; charset=utf-8")
+                return self.send(200, json.dumps(d, ensure_ascii=False), "application/json; charset=utf-8")
             except Exception as e: return self.send(500, json.dumps({"error": str(e)}), "application/json")
         if u.path == "/api/ranking":
             q = dict(urllib.parse.parse_qsl(u.query))
