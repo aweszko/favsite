@@ -1656,16 +1656,23 @@ def _seed_payload(now_ts=None):
             raw = json.load(f)
     except Exception:
         return None
-    picks = [p for p in (raw.get("picks") or []) if _seed_still_relevant(p, now_ts)]
+    raw_picks = [p for p in (raw.get("picks") or []) if _seed_still_relevant(p, now_ts)]
     picks_1h = [p for p in (raw.get("picks_1h") or []) if _seed_still_relevant(p, now_ts)]
-    if not picks and not picks_1h:
+    # Zakładka przedmeczowa: tylko over w 1. połowie (zrzut ma też stare typy 2H).
+    one_h = [goal_overs.sanitize_team_names(dict(p)) for p in picks_1h if goal_overs._is_pre_1h_line(p)]
+    if not one_h:
+        one_h = [goal_overs.sanitize_team_names(dict(p)) for p in raw_picks if goal_overs._is_pre_1h_line(p)]
+    if not one_h:
         return None
-    for i, p in enumerate(picks, 1):
-        p["rank"] = i
-    for i, p in enumerate(picks_1h, 1):
+    for i, p in enumerate(one_h, 1):
         p["rank"] = i
     out = dict(raw)
-    out.update(picks=picks, n_picks=len(picks), picks_1h=picks_1h, n_picks_1h=len(picks_1h), source="seed")
+    out.update(picks=one_h, n_picks=len(one_h), picks_1h=one_h, n_picks_1h=len(one_h),
+               source="seed")
+    note = out.get("note") or ""
+    if "1. połow" not in note:
+        out["note"] = ("Tylko gole w 1. połowie (over 0.5, 1.5 i 2.5). "
+                       + note).strip()
     return out
 
 

@@ -1453,6 +1453,9 @@ class TGoalOvers(unittest.TestCase):
         self.assertGreaterEqual(p["chance_pct"], 70)
         self.assertRegex(p.get("frac") or "", r"\d+/\d+")
         self.assertTrue(p.get("play"))
+        for sp in seed["picks"]:
+            self.assertTrue(app.goal_overs._is_pre_1h_line(sp), sp.get("play") or sp.get("key"))
+            self.assertNotIn("2. połowie", (sp.get("play") or ""))
         self.assertGreaterEqual(len(seed.get("picks_1h") or []), 5)
         p1 = seed["picks_1h"][0]
         self.assertEqual(p1.get("key"), "over05_1h")
