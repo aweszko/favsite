@@ -2306,7 +2306,7 @@ def _publish_live_overs(evs, partial=False, fetch_odds=False, fetched_at=None):
     res = {
         "generated_warsaw": to_warsaw(now).strftime("%Y-%m-%d %H:%M:%S"),
         "feed_warsaw": state_stamp(fetched_at)[1],
-        "feed_age_seconds": None if age is None else round(age),
+        "feed_age_seconds": None if age is None else max(0, round(age)),
         "picks": picks, "n_picks": len(picks),
         "matches": pub_matches, "n_matches": len(pub_matches),
         "source": "live", "partial": partial, "mode": "live",
@@ -2621,7 +2621,13 @@ def refresh_other_cards(live=None, live_t=None, pre=None, pre_t=None, now=None, 
     if pre is None:
         pre = fetch_other_list("prematch")
         pre_t = cache_fetched_at("list:other-prematch")
-    live_age = (now - live_t) if live_t else None
+    # wiek liczony od teraz (fetch listy może ustawić live_t po zapamiętaniu now)
+    live_age = (time.time() - live_t) if live_t else None
+    if now is not None and live_t:
+        # w testach podajemy sztuczne now
+        live_age = now - live_t
+    if live_age is not None:
+        live_age = max(0.0, live_age)
     live_ok = live_t is not None and live_age is not None and live_age <= LIVE_STATE_MAX_AGE
     live_by = {e.get("eventId"): e for e in (live or []) if e and e.get("eventId") is not None}
     pre_by = {e.get("eventId"): e for e in (pre or []) if e and e.get("eventId") is not None}

@@ -2153,6 +2153,7 @@ _MATCH_COPY_KEYS = (
     "time_label", "phase", "minutes", "period", "tournament",
     "category", "start_warsaw", "day_warsaw", "ts", "warnings",
     "recommend", "o1", "o2",
+    "state_ts", "state_warsaw", "state_age_seconds", "state_label",
 )
 
 

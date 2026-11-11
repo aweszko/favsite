@@ -1676,6 +1676,29 @@ class TFreshOvers(unittest.TestCase):
         self.assertEqual(out["cards"][0]["home"], "Parnu")
         self.assertEqual(out["dropped_ended"], 0)
 
+    def test_rank_row_copies_state_stamp(self):
+        import other_overs as o
+        now_ts = __import__("time").time()
+        prof = self._other_profile(eid=15, mode="live")
+        live = [{"eventId": 15, "home": "Parnu", "away": "Slovan Bratysława",
+                 "sport": "basketball", "sportId": 4, "mode": "live",
+                 "score": "90:50", "home_score": 90, "away_score": 50,
+                 "period": "4K", "minutes": 36, "remainingPeriodTime": "5:03"}]
+        out = app.refresh_other_cards(live=live, live_t=now_ts - 8, pre=[], pre_t=now_ts,
+                                      now=now_ts, profiles={15: prof})
+        self.assertTrue(out["cards"])
+        card = out["cards"][0]
+        self.assertTrue(card.get("state_label"))
+        ln = (card.get("lines") or [card])[0]
+        import goal_overs as g
+        row = g._row_from_match_line(card, ln)
+        self.assertEqual(row.get("state_label"), card.get("state_label"))
+        self.assertTrue(row.get("state_warsaw"))
+        pub = o.public_line_card(row)
+        self.assertEqual(pub.get("state_label"), card["state_label"])
+        self.assertGreaterEqual(out["live_age"], 0)
+
+
 
 
 
