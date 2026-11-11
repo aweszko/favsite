@@ -1046,78 +1046,152 @@ class TGoalOvers(unittest.TestCase):
         ms = [self._game("h", True, [("home", 30)]) for _ in range(10)]
         h = g.team_profile("h", ms, name="Alfa")
         a = g.team_profile("a", ms, name="Beta")
-        card = g.pick_live_for_match(h, a, {"minutes": 20, "score": "0:0", "period": "1P"})
+        card = g.live_match_card(h, a, {"minutes": 20, "score": "0:0", "period": "1P"})
         self.assertIsNotNone(card)
         self.assertEqual(card["key"], "over05_1h")
         self.assertEqual(card["frac"], "20/20")
+        self.assertEqual(card["dist"][1]["frac"], "20/20")
         self.assertIn("20", card["time_label"])
         self.assertIn("0:0", card["summary"])
         self.assertIn("Szansa:", card["summary"])
-        self.assertTrue(card.get("qualified"))
         self.assertIn("1. połowie", card["play"])
-        self.assertNotIn("w meczu", (card.get("play") or "").lower())
+        # w 1H linia meczu nie jest równoważna golowi do przerwy — nie dodajemy jej
+        self.assertFalse(any(ln["scope"] == "match" for ln in card["lines"]))
         self.assertRegex(card["summary"], r"Po 20\. minucie przy tym wyniku gol do przerwy padł w 20/20")
 
-    def test_live_1h_with_goal_is_over_in_first_half_only(self):
+    def test_live_1h_with_goal_maps_to_over15_in_first_half(self):
         import goal_overs as g
-        # o 20. min już 1 gol (12'), kolejny w 1H w 35. — typ to over 1.5 w 1. połowie
+        # o 20. min już 1 gol (12'), kolejny w 1H w 35. — 1+ do przerwy = over 1.5 w 1. połowie
         ms = [self._game("h", True, [("home", 12), ("away", 35)]) for _ in range(10)]
         h = g.team_profile("h", ms, name="Alfa")
         a = g.team_profile("a", ms, name="Beta")
-        card = g.pick_live_for_match(h, a, {"minutes": 20, "score": "1:0", "period": "1P",
+        card = g.live_match_card(h, a, {"minutes": 20, "score": "1:0", "period": "1P",
             "periods": [{"homeTeamScore": 1, "awayTeamScore": 0, "type": "FIRST_HALF", "num": 1}]})
         self.assertIsNotNone(card)
-        self.assertEqual(card["key"], "over15_1h")
-        self.assertIn("1. połowie", card["play"])
-        self.assertIn("1.5", card["play"])
-        self.assertNotIn("w meczu", (card.get("play") or "").lower())
-        self.assertEqual(card["frac"], "20/20")
-        self.assertNotEqual(card["key"], "over_next")
+        keys = {ln["key"] for ln in card["lines"]}
+        self.assertIn("over15_1h", keys)
+        self.assertNotIn("over_next", keys)
+        self.assertFalse(any(ln["scope"] == "match" for ln in card["lines"]))
+        one = next(ln for ln in card["lines"] if ln["key"] == "over15_1h")
+        self.assertEqual(one["frac"], "20/20")
+        self.assertEqual(one["need"], 1)
 
     def test_live_2h_at_ht_00(self):
         import goal_overs as g
         ms = [self._game("h", True, [("home", 60)]) for _ in range(10)]
         h = g.team_profile("h", ms, name="Alfa")
         a = g.team_profile("a", ms, name="Beta")
-        card = g.pick_live_for_match(h, a, {"minutes": 45, "score": "0:0", "period": "HT",
+        card = g.live_match_card(h, a, {"minutes": 45, "score": "0:0", "period": "HT",
             "periods": [{"homeTeamScore": 0, "awayTeamScore": 0, "type": "RegularPeriod", "num": 1}]})
         self.assertIsNotNone(card)
         self.assertEqual(card["key"], "over05_2h")
         self.assertIn("przerwa", card["time_label"])
         self.assertIn("Szansa:", card["summary"])
         self.assertEqual(card["frac"], "20/20")
+        keys = {ln["key"] for ln in card["lines"]}
+        self.assertIn("over05_2h", keys)
+        self.assertIn("over05", keys)  # 0:0 przerwa: over 0.5 w meczu = 1+ w 2H
 
-    def test_live_2h_with_goal_is_over_in_second_half_only(self):
+    def test_live_2h_with_goal_maps_half_and_match_lines(self):
         import goal_overs as g
-        # do 60. min jeden gol w 2H (50'), kolejny w 80. — typ over 1.5 w 2. połowie, nigdy over meczu
+        # do 60. min jeden gol w 2H (50'), kolejny w 80. — 1+ = over 1.5 w 2H = over 1.5 w meczu
         ms = [self._game("h", True, [("home", 50), ("away", 80)]) for _ in range(10)]
         h = g.team_profile("h", ms, name="Alfa")
         a = g.team_profile("a", ms, name="Beta")
-        card = g.pick_live_for_match(h, a, {"minutes": 60, "score": "1:0", "period": "2P",
+        card = g.live_match_card(h, a, {"minutes": 60, "score": "1:0", "period": "2P",
             "periods": [
                 {"homeTeamScore": 0, "awayTeamScore": 0, "type": "FIRST_HALF", "num": 1},
                 {"homeTeamScore": 1, "awayTeamScore": 0, "type": "SECOND_HALF", "num": 2},
             ]})
         self.assertIsNotNone(card)
-        self.assertEqual(card["key"], "over15_2h")
-        self.assertIn("2. połowie", card["play"])
-        self.assertIn("1.5", card["play"])
-        self.assertNotIn("w meczu", (card.get("play") or "").lower())
-        self.assertEqual(card["frac"], "20/20")
-        self.assertNotEqual(card["key"], "over_next")
+        by = {ln["key"]: ln for ln in card["lines"]}
+        self.assertIn("over15_2h", by)
+        self.assertIn("over15", by)
+        self.assertEqual(by["over15_2h"]["frac"], "20/20")
+        self.assertEqual(by["over15"]["need"], 1)
+        self.assertEqual(by["over15"]["line"], 1.5)
+        self.assertNotIn("over_next", by)
 
-    def test_live_below_threshold_is_not_qualified(self):
+    def test_live_small_sample_is_kept_with_warning(self):
         import goal_overs as g
-        # tylko 2/20 ma gola w 1H po 30. minucie — szansa niska, karta jest, ale poza rankingiem
-        ms = [self._game("h", True, [("home", 40)] if i < 1 else []) for i in range(10)]
+        # mała próba i niska szansa — mecz zostaje na liście, z ostrzeżeniem, nie w rankingu
+        ms = [self._game("h", True, [("home", 40)] if i < 1 else []) for i in range(3)]
         h = g.team_profile("h", ms, name="Alfa")
         a = g.team_profile("a", ms, name="Beta")
-        card = g.pick_live_for_match(h, a, {"minutes": 30, "score": "0:0", "period": "1P"})
+        card = g.live_match_card(h, a, {"minutes": 30, "score": "0:0", "period": "1P"})
         self.assertIsNotNone(card)
         self.assertEqual(card["key"], "over05_1h")
-        self.assertEqual(card["frac"], "2/20")
-        self.assertFalse(card.get("qualified"))
+        self.assertEqual(card["frac"], "2/6")
         self.assertIn("1. połowie", card["play"])
+        self.assertTrue(any("mało" in w or "próba" in w for w in (card.get("warnings") or [])))
+        # bez kursu linia nie wchodzi do rankingu, ale mecz jest
+        ranked = g.rank_live_lines([card])
+        self.assertEqual(ranked, [])
+
+    def test_live_ht_20_maps_over35_in_match_from_2plus_in_2h(self):
+        import goal_overs as g
+        # jak 2:0 o przerwie: 16 meczów z dokładnie 2 golami w 2H, 4 bez gola w 2H
+        def pack():
+            ms = []
+            for i in range(10):
+                if i < 8:
+                    ms.append(self._game("h", True, [("home", 20), ("home", 50), ("away", 80)]))
+                else:
+                    ms.append(self._game("h", True, [("home", 20)]))
+            return ms
+        h = g.team_profile("h", pack(), name="Hiszpania U19")
+        a = g.team_profile("a", pack(), name="Islandia U19")
+        meta = {"minutes": 45, "score": "2:0", "period": "HT",
+                "periods": [{"homeTeamScore": 2, "awayTeamScore": 0, "type": "FIRST_HALF", "num": 1}],
+                "eventId": 1, "home": "Hiszpania U19", "away": "Islandia U19"}
+        card = g.live_match_card(h, a, meta)
+        self.assertIsNotNone(card)
+        self.assertEqual(card["dist"][1]["frac"], "16/20")
+        self.assertEqual(card["dist"][2]["frac"], "16/20")
+        self.assertEqual(card["dist"][3]["frac"], "0/20")  # nikt nie miał 3+ w 2H
+        by = {ln["key"]: ln for ln in card["lines"]}
+        # 1+/2+/3+ w 2H = over 0.5/1.5/2.5 w 2H = over 2.5/3.5/4.5 w meczu
+        self.assertEqual(by["over05_2h"]["need"], 1)
+        self.assertEqual(by["over25"]["need"], 1)
+        self.assertEqual(by["over25"]["line"], 2.5)
+        self.assertEqual(by["over15_2h"]["need"], 2)
+        self.assertEqual(by["over35"]["need"], 2)
+        self.assertEqual(by["over35"]["line"], 3.5)
+        self.assertEqual(by["over25_2h"]["need"], 3)
+        self.assertEqual(by["over45"]["need"], 3)
+        self.assertIn("2+ goli w 2. połowie padło w 16/20", by["over35"]["why"])
+        # kurs 1.22 na over 0.5 / 2.5 to MINUS przy typowej szansie ~70%+; over 3.5 @1.85 to PLUS
+        card = g.apply_odds_to_match(card, {"over05_2h": 1.22, "over25": 1.22, "over35": 1.85, "over15_2h": 1.70})
+        by = {ln["key"]: ln for ln in card["lines"]}
+        self.assertEqual(by["over25"]["verdict"], "MINUS")
+        self.assertAlmostEqual(by["over25"]["implied"], 1 / 1.22, places=3)
+        self.assertGreaterEqual(by["over35"]["chance"], 0.60)
+        self.assertEqual(by["over35"]["verdict"], "PLUS")
+        self.assertGreaterEqual(by["over35"]["edge"], 0.03)
+        ranked = g.rank_live_lines([card])
+        self.assertTrue(ranked)
+        self.assertEqual(ranked[0]["key"], "over35")  # większa przewaga niż krótki over 2.5
+        self.assertIn("@1.85", ranked[0]["summary"])
+        self.assertIn("over 3.5 w meczu", ranked[0]["summary"])
+        self.assertIn("kurs zakłada", ranked[0]["summary"])
+        self.assertIn("16/20", ranked[0]["summary"])
+
+    def test_plus_minus_threshold_three_pp(self):
+        import goal_overs as g
+        base = {"need": 2, "scope": "match", "line": 3.5, "key": "over35",
+                "play": "Over 3.5 w meczu", "chance": 0.73, "chance_pct": 73,
+                "frac": "15/20", "k": 15, "n": 20}
+        minus = g.apply_odds_to_line(base, {"over35": 1.22})  # implied ~82%
+        self.assertEqual(minus["verdict"], "MINUS")
+        plus = g.apply_odds_to_line(base, {"over35": 1.85})   # implied ~54%, edge ~19 pp
+        self.assertEqual(plus["verdict"], "PLUS")
+        # równo 3 pp: 0.63 vs 1/1.666... ≈ 0.60
+        edge3 = g.apply_odds_to_line(dict(base, chance=0.63, chance_pct=63), {"over35": 1.0 / 0.60})
+        self.assertEqual(edge3["verdict"], "PLUS")
+        short = g.apply_odds_to_line(dict(base, chance=0.61, chance_pct=61), {"over35": 1.0 / 0.60})
+        self.assertEqual(short["verdict"], "MINUS")
+        none = g.apply_odds_to_line(base, {})
+        self.assertIsNone(none["verdict"])
 
     def test_pre_summary_over15_and_btts(self):
         import goal_overs as g
@@ -1150,6 +1224,27 @@ class TGoalOvers(unittest.TestCase):
         self.assertEqual(got["btts"], 1.68)
         self.assertNotIn("over05_1h", got)
 
+    def test_parse_live_goal_odds_plain_lines_only(self):
+        odds = [
+            {"marketName": "Liczba goli", "name": "powyżej 2.5", "price": 1.03, "status": "active"},
+            {"marketName": "Liczba goli", "name": "powyżej 3.5", "price": 1.33, "status": "active"},
+            {"marketName": "Liczba goli", "name": "powyżej 4.5", "price": 2.10, "status": "active"},
+            {"marketName": "2.połowa - liczba goli", "name": "powyżej 0.5", "price": 1.22, "status": "active"},
+            {"marketName": "2.połowa - liczba goli", "name": "powyżej 1.5", "price": 1.85, "status": "active"},
+            {"marketName": "2.połowa - Hiszpania U19 - liczba goli", "name": "powyżej 0.5", "price": 1.05, "status": "active"},
+            {"marketName": "Liczba goli & obie drużyny strzelą", "name": "powyżej 3.5 & tak", "price": 3.45, "status": "active"},
+            {"marketName": "Liczba goli od 45:00 do 59:59 minuty", "name": "powyżej 0.5", "price": 1.78, "status": "active"},
+            {"marketName": "1.połowa - liczba goli", "name": "powyżej 0.5", "price": 1.40, "status": "block"},
+        ]
+        got = app.parse_live_goal_odds(odds)
+        self.assertEqual(got["over25"], 1.03)
+        self.assertEqual(got["over35"], 1.33)
+        self.assertEqual(got["over45"], 2.10)
+        self.assertEqual(got["over05_2h"], 1.22)
+        self.assertEqual(got["over15_2h"], 1.85)
+        self.assertNotIn("over05_1h", got)
+        self.assertFalse(any("&" in k or "od" in k for k in got))
+
     def test_parse_live_state_periods(self):
         import goal_overs as g
         st = g.parse_live_state({"minutes": 63, "score": "3:0", "period": "2P",
@@ -1169,7 +1264,10 @@ class TGoalOvers(unittest.TestCase):
         self.assertIn("/api/goal-overs-pre", app.HTML)
         self.assertIn("Overy LIVE", app.HTML)
         self.assertIn("Overy przedmeczowe", app.HTML)
-        self.assertIn("Pozostałe mecze live", app.HTML)
+        self.assertNotIn("Pozostałe mecze live", app.HTML)
+        self.assertIn("Wszystkie mecze live", app.HTML)
+        self.assertIn("PLUS", app.HTML)
+        self.assertIn("Kurs zakłada", app.HTML)
         self.assertIn("Szansa:", app.HTML)
         self.assertIn("Ranking 1–10", app.HTML)
 

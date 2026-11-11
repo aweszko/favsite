@@ -1914,6 +1914,75 @@ def parse_over_odds(odds):
     return out
 
 
+def _over_line_from_name(on):
+    on = (on or "").strip().lower().replace(",", ".")
+    for prefix in ("powyżej ", "powyzej ", "over "):
+        if on.startswith(prefix):
+            rest = on[len(prefix):].strip()
+            tok = rest.split()[0] if rest else ""
+            try:
+                return float(tok)
+            except (TypeError, ValueError):
+                return None
+    return None
+
+
+def _norm_market_name(mn):
+    return " ".join((mn or "").strip().lower().split())
+
+
+def parse_live_goal_odds(odds):
+    """Kursy prostych linii over liczby goli (mecz / 1H / 2H). Pomija kombinacje i zawieszone."""
+    out = {}
+    for o in odds or []:
+        st = (o.get("status") or "").lower()
+        if st in ("block", "blocked", "suspended", "deactivated", "inactive"):
+            continue
+        mn = _norm_market_name(o.get("marketName"))
+        on = (o.get("name") or "").strip().lower()
+        if ";" in mn or " & " in mn or " lub " in mn or " od " in mn:
+            continue
+        if ";" in on or " & " in on or " lub " in on:
+            continue
+        if mn == "liczba goli":
+            scope = "match"
+        elif mn in ("1.połowa - liczba goli", "1. połowa - liczba goli"):
+            scope = "1h"
+        elif mn in ("2.połowa - liczba goli", "2. połowa - liczba goli"):
+            scope = "2h"
+        else:
+            continue
+        line = _over_line_from_name(on)
+        if line is None:
+            continue
+        if abs((line * 2) % 2 - 1) > 1e-6:
+            continue
+        try:
+            price = float(o.get("price"))
+        except (TypeError, ValueError):
+            continue
+        if price <= 1:
+            continue
+        key = "over%d5" % int(line) if scope == "match" else "over%d5_%s" % (int(line), scope)
+        out[key] = price
+    return out
+
+
+def event_live_goal_odds(eid):
+    """Aktualne kursy over z /events/{id}, cache ~55 s (live)."""
+    if not eid:
+        return {}
+    def f():
+        d = http_json("%s/events/%s" % (SB, eid), "Superbet")
+        if not d:
+            return None
+        ev = d.get("data")
+        if isinstance(ev, list):
+            ev = ev[0] if ev else {}
+        return parse_live_goal_odds((ev or {}).get("odds"))
+    return cached("liveodds:%s" % eid, LIST_TTL, f) or {}
+
+
 def event_over_odds(eid):
     if not eid:
         return {}
@@ -2027,8 +2096,32 @@ def _live_profile_pair(ev):
     return hp, ap
 
 
-def _publish_live_overs(evs, partial=False):
-    cards, skipped = [], {"nobr": 0, "nostats": 0, "thin": 0, "done": 0}
+def _peek_cached(key, ttl):
+    with LOCK:
+        v = CACHE.get(key)
+    if v and time.time() - v[0] < ttl:
+        return v[1]
+    return None
+
+
+def _live_odds_for(eids, fetch=False):
+    """Kursy over dla eventów. fetch=False — tylko z cache (lekko przy liczeniu historii)."""
+    got = {}
+    eids = [e for e in eids if e]
+    if not eids:
+        return got
+    if not fetch:
+        for eid in eids:
+            got[eid] = _peek_cached("liveodds:%s" % eid, LIST_TTL) or {}
+        return got
+    with ThreadPoolExecutor(OVERS_WORKERS) as ex:
+        for eid, od in zip(eids, ex.map(event_live_goal_odds, eids)):
+            got[eid] = od or {}
+    return got
+
+
+def _publish_live_overs(evs, partial=False, fetch_odds=False):
+    cards, skipped = [], {"nobr": 0, "nostats": 0, "noline": 0, "done": 0}
     for ev in evs:
         if not ev.get("br"):
             skipped["nobr"] += 1
@@ -2042,32 +2135,40 @@ def _publish_live_overs(evs, partial=False):
             skipped["nostats"] += 1
             continue
         hp, ap = pair
-        card = goal_overs.pick_live_for_match(hp, ap, _live_meta(ev))
+        card = goal_overs.live_match_card(hp, ap, _live_meta(ev))
         skipped["done"] += 1
         if card:
             cards.append(card)
-            if not card.get("qualified"):
-                skipped["thin"] += 1
         else:
-            skipped["thin"] += 1
-    strong = [c for c in cards if c.get("qualified")]
-    rest = [c for c in cards if not c.get("qualified")]
-    picks = [goal_overs.public_card(c) for c in goal_overs.rank_picks(strong, limit=goal_overs.MAX_PICKS)]
-    rest_sorted = goal_overs.rank_picks(rest, limit=50)
-    others = [goal_overs.public_card(c) for c in rest_sorted]
-    # rank_picks nadaje rank 1.. też pozostałym — zostaw jako kolejność, bez mieszania z czołówką
+            skipped["noline"] += 1
+    odds_map = _live_odds_for([c.get("eventId") for c in cards], fetch=fetch_odds)
+    for i, card in enumerate(cards):
+        cards[i] = goal_overs.apply_odds_to_match(card, odds_map.get(card.get("eventId")) or {})
+    # wszystkie mecze z historią w jednej liście (mała próba = ostrzeżenie)
+    matches_sorted = sorted(
+        cards,
+        key=lambda m: (
+            -(max((ln.get("edge") if ln.get("edge") is not None else -99) for ln in (m.get("lines") or []) or [{}])),
+            -(max((ln.get("chance") or 0) for ln in (m.get("lines") or []) or [{}])),
+            m.get("ts") or 0,
+        ),
+    )
+    picks = [goal_overs.public_line_card(c) for c in goal_overs.rank_live_lines(matches_sorted)]
+    pub_matches = [goal_overs.public_match_card(m) for m in matches_sorted]
     now = datetime.now(timezone.utc)
     res = {
         "generated_warsaw": to_warsaw(now).strftime("%Y-%m-%d %H:%M:%S"),
         "picks": picks, "n_picks": len(picks),
-        "others": others, "n_others": len(others),
+        "matches": pub_matches, "n_matches": len(pub_matches),
         "source": "live", "partial": partial, "mode": "live",
         "footer": {"matches": len(evs), "checked": skipped["done"],
                    "without_stats": skipped["nostats"] + skipped["nobr"],
-                   "too_weak": skipped["thin"], "min_n": goal_overs.MIN_N,
-                   "p_min": goal_overs.P_MIN},
+                   "no_sample": skipped["noline"],
+                   "min_n": goal_overs.MIN_N,
+                   "p_min": goal_overs.LIVE_RANK_P_MIN,
+                   "edge_plus": goal_overs.EDGE_PLUS},
         "rule": goal_overs.CHANCE_RULE,
-        "note": "Tylko mecze LIVE. W 1. połowie szansa dotyczy wyłącznie gola do przerwy, w 2. połowie (i o przerwie) — wyłącznie gola w 2. połowie. Ranking: min. 8 meczów i szansa ≥ 70%. Forma, nie gwarancja. Nic nie jest stawiane.",
+        "note": "Tylko mecze LIVE. Szansa dotyczy goli w pozostałym czasie bieżącej połowy (1H: do przerwy; przerwa/2H: w 2. połowie) i linii over w połowie oraz — o przerwie i w 2H — analogicznego over w meczu. Ranking: linie z szansą ≥ 60% i kursem Superbet, wg przewagi (szansa − 1/kurs). PLUS, gdy model bije kurs o co najmniej 3 pp. Mała próba to ostrzeżenie, nie ukrywanie. Forma, nie gwarancja. Nic nie jest stawiane.",
     }
     with LOCK:
         LIVE_OVERS_STATE.update(res=res, t=time.time())
@@ -2105,7 +2206,7 @@ def build_overs_live(progress=None, job=None):
                 progress["done"] = progress.get("done", 0) + 1
                 if job is not None:
                     job["beat"] = time.time()
-        _publish_live_overs(evs, partial=True)
+        _publish_live_overs(evs, partial=True, fetch_odds=False)
 
     if need:
         with ThreadPoolExecutor(OVERS_WORKERS) as pool:
@@ -2115,7 +2216,7 @@ def build_overs_live(progress=None, job=None):
                     break
                 ev, pair = fut.result()
                 touch(ev, pair)
-    return _publish_live_overs(evs, partial=False)
+    return _publish_live_overs(evs, partial=False, fetch_odds=True)
 
 
 def _live_overs_worker(job):
@@ -2135,9 +2236,11 @@ def get_overs_live():
     """Karty z cache'owanych profili od razu, stan live co ~minutę, historia z dysku/pamięci."""
     evs = fetch_live_football()
     # usuń zakończone z bieżącego widoku (profile zostają)
-    res = _publish_live_overs(evs, partial=bool(LIVE_OVERS_STATE.get("job")))
     missing = [e for e in evs if e.get("br") and e.get("eventId") not in LIVE_PROFILES
                and (LIVE_FAIL_UNTIL.get(e.get("eventId")) or 0) < time.time()]
+    # kursy dociągamy, gdy historia już jest — cache 55 s, bez dodatkowego liczenia timeline
+    res = _publish_live_overs(evs, partial=bool(LIVE_OVERS_STATE.get("job") or missing),
+                             fetch_odds=not missing)
     with LOCK:
         job = LIVE_OVERS_STATE.get("job")
         if missing and job is None:
