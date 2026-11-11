@@ -7,6 +7,7 @@ import json, os, sys, time, threading, urllib.request, urllib.parse, webbrowser
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import next_goal
 import goal_overs
+import other_overs
 from datetime import datetime, timedelta, timezone
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 
@@ -2363,6 +2364,246 @@ def get_overs_live():
 
 
 
+# ---------- Overy: tenis, siatka, kosz, hokej ----------
+OTHER_OVERS_TTL = 55
+OTHER_OVERS_STATE = {"res": None, "t": 0, "job": None}
+OTHER_LIVE_CAP = 12   # na dyscyplinę, najpierw live
+OTHER_PRE_CAP = 8
+OTHER_SPORTS = (1, 2, 3, 4)
+
+
+def fetch_other_list(state):
+    """Lista Superbet dla tenisa, siatkówki, kosza i hokeja (bez dociągania 1X2)."""
+    def f():
+        now = datetime.now(timezone.utc)
+        a, b = _window(state, now)
+        q = urllib.parse.urlencode({"currentStatus": "active", "offerState": state,
+                                    "startDate": fmt(a), "endDate": fmt(b)})
+        d = http_json(SB + "/events/by-date?" + q, "Superbet")
+        if d is None:
+            return None
+        stc = struct()
+        out = []
+        for e in d.get("data") or []:
+            sid = e.get("sportId")
+            if sid not in OTHER_SPORTS:
+                continue
+            sport = other_overs.SPORT_BY_ID.get(sid)
+            if not sport:
+                continue
+            m = e.get("metadata") or {}
+            name = e.get("matchName") or ""
+            parts = name.split("·") if "·" in name else name.split(" - ")
+            start = e.get("utcDate") or e.get("matchDate") or e.get("startDate")
+            dt = parse_utc(start)
+            tn = stc["t"].get(str(e.get("tournamentId")), ("", 0))
+            hs, aws = m.get("homeTeamScore"), m.get("awayTeamScore")
+            out.append({
+                "eventId": e.get("eventId"), "sportId": sid, "sport": sport,
+                "name": name.replace("·", " – "),
+                "home": parts[0].strip() if parts else "",
+                "away": parts[1].strip() if len(parts) > 1 else "",
+                "br": str(e.get("betradarId") or m.get("brId") or "") or None,
+                "tournament": tn[0] or None,
+                "category": stc["c"].get(str(e.get("categoryId"))) or None,
+                "start": start, "ts": int(dt.timestamp() * 1000) if dt else None,
+                "start_warsaw": to_warsaw(dt).strftime("%H:%M") if dt else "",
+                "day_warsaw": to_warsaw(dt).strftime("%Y-%m-%d") if dt else "",
+                "minutes": m.get("minutes"),
+                "period": m.get("periodStatus"),
+                "periodStatus": m.get("periodStatus"),
+                "score": None if hs is None else "%s:%s" % (hs, aws),
+                "home_score": hs, "away_score": aws,
+                "homeTeamScore": hs, "awayTeamScore": aws,
+                "homeTeamGameScore": m.get("homeTeamGameScore"),
+                "awayTeamGameScore": m.get("awayTeamGameScore"),
+                "periods": m.get("periods") or [],
+                "remainingPeriodTime": m.get("remainingPeriodTime") or m.get("remainingTime"),
+                "status": m.get("status"), "mode": "live" if state == "live" else "prematch",
+            })
+        return out
+    return cached("list:other-%s" % state, LIST_TTL, f) or []
+
+
+def _select_other_events(live, pre):
+    out, seen = [], set()
+    per_live, per_pre = {s: 0 for s in OTHER_SPORTS}, {s: 0 for s in OTHER_SPORTS}
+    for e in live or []:
+        sid = e.get("sportId")
+        eid = e.get("eventId")
+        if sid not in per_live or eid in seen:
+            continue
+        if per_live[sid] >= OTHER_LIVE_CAP:
+            continue
+        per_live[sid] += 1
+        seen.add(eid)
+        out.append(e)
+    pres = sorted([e for e in (pre or []) if e], key=lambda x: x.get("ts") or 0)
+    for e in pres:
+        sid = e.get("sportId")
+        eid = e.get("eventId")
+        if sid not in per_pre or eid in seen:
+            continue
+        if per_pre[sid] >= OTHER_PRE_CAP:
+            continue
+        per_pre[sid] += 1
+        seen.add(eid)
+        out.append(e)
+    return out
+
+
+def event_other_odds(eid, sport, live=False):
+    if not eid:
+        return {}
+    ttl = LIST_TTL if live else 600
+
+    def f():
+        d = http_json("%s/events/%s" % (SB, eid), "Superbet")
+        if not d:
+            return None
+        ev = d.get("data")
+        if isinstance(ev, list):
+            ev = ev[0] if ev else {}
+        return other_overs.parse_other_odds((ev or {}).get("odds"), sport)
+    return cached("otherodds:%s:%s" % (eid, sport), ttl, f) or {}
+
+
+def _build_other_card(ev):
+    br = ev.get("br")
+    if not br:
+        return None, "nobr"
+    info = match_info(br)
+    if not info:
+        return None, "nostats"
+    hu = (info.get("home") or {}).get("uid")
+    au = (info.get("away") or {}).get("uid")
+    if not hu or not au:
+        return None, "nostats"
+    hd, ad = lastx_raw(hu), lastx_raw(au)
+    if hd is None and ad is None:
+        return None, "nostats"
+    sport = ev.get("sport")
+    home_ms = other_overs.parse_lastx(hd, sport)
+    away_ms = other_overs.parse_lastx(ad, sport)
+    if not other_overs.has_main_history(home_ms, away_ms, sport):
+        return None, "thin"
+    offers = event_other_odds(ev.get("eventId"), sport, live=(ev.get("mode") == "live"))
+    if not offers:
+        return None, "noodds"
+    card = other_overs.match_card(home_ms, away_ms, ev, offers)
+    if not card:
+        return None, "noline"
+    if info.get("tournament") and not card.get("tournament"):
+        card["tournament"] = info["tournament"]
+    if info.get("category") and not card.get("category"):
+        card["category"] = info["category"]
+    return card, None
+
+
+def _publish_other(cards, evs, skipped, processed_ids, partial, listed_by=None):
+    ranked = other_overs.rank_cards(cards)
+    pub_matches = [other_overs.public_match_card(c) for c in cards if c]
+    picks = [other_overs.public_line_card(r) for r in ranked]
+    now = datetime.now(timezone.utc)
+    cov = listed_by or {}
+    sports = {}
+    for sid, name in other_overs.SPORT_BY_ID.items():
+        pl = other_overs.SPORT_PL[name]
+        with_h = sum(1 for c in cards if c.get("sport") == name)
+        ranked_n = sum(1 for p in picks if p.get("sport") == name)
+        sports[name] = {"id": sid, "label": pl, "listed": cov.get(sid, 0),
+                        "with_history": with_h, "ranked": ranked_n}
+    res = {
+        "generated_warsaw": to_warsaw(now).strftime("%Y-%m-%d %H:%M:%S"),
+        "picks": picks, "n_picks": len(picks),
+        "matches": pub_matches, "n_matches": len(pub_matches),
+        "source": "live", "partial": partial,
+        "note": ("Tenis, siatkówka, koszykówka i hokej. Każdy mecz raz. "
+                 "Typuję tylko przy kursie Superbet ok. 1,30 albo wyższym. "
+                 "Bez historii (mniej niż 8 meczów na stronę) spotkania nie pokazuję. "
+                 "Szansa na wygraną zakładu jest przy każdym typie. Forma, nie gwarancja. Nic nie jest stawiane."),
+        "rule": other_overs.CHANCE_RULE,
+        "footer": {
+            "matches": len(evs), "checked": len(processed_ids),
+            "without_stats": skipped.get("nostats", 0) + skipped.get("nobr", 0),
+            "too_weak": skipped.get("thin", 0),
+            "no_odds": skipped.get("noodds", 0),
+            "no_line": skipped.get("noline", 0),
+            "min_n_side": other_overs.MIN_SIDE,
+            "p_min": other_overs.P_MIN,
+            "min_odds": other_overs.MIN_ODDS,
+            "sports": sports,
+        },
+    }
+    with LOCK:
+        OTHER_OVERS_STATE.update(res=res, t=time.time() if not partial else OTHER_OVERS_STATE["t"] or time.time())
+    return res
+
+
+def _other_overs_worker(job):
+    try:
+        live, pre = fetch_other_list("live"), fetch_other_list("prematch")
+        evs = _select_other_events(live, pre)
+        listed_by = {}
+        for e in evs:
+            listed_by[e.get("sportId")] = listed_by.get(e.get("sportId"), 0) + 1
+        cards, skipped, processed = [], {}, set()
+        job["progress"] = {"done": 0, "total": len(evs)}
+        for i, ev in enumerate(evs, 1):
+            if job.get("cancel"):
+                break
+            job["beat"] = time.time()
+            try:
+                c, why = _build_other_card(ev)
+                if c:
+                    cards.append(c)
+                else:
+                    skipped[why or "err"] = skipped.get(why or "err", 0) + 1
+            except Exception as e:
+                skipped["err"] = skipped.get("err", 0) + 1
+                ERRORS["overy_inne"] = "%s: %s" % (type(e).__name__, e)
+            processed.add(ev.get("eventId"))
+            job["progress"]["done"] = i
+            if i % 4 == 0 or i == len(evs):
+                _publish_other(cards, evs, skipped, processed, partial=(i < len(evs)),
+                               listed_by=listed_by)
+        _publish_other(cards, evs, skipped, processed, partial=False, listed_by=listed_by)
+    except Exception as e:
+        ERRORS["overy_inne"] = "%s: %s" % (type(e).__name__, e)
+    finally:
+        with LOCK:
+            if OTHER_OVERS_STATE.get("job") is job:
+                OTHER_OVERS_STATE["job"] = None
+
+
+def get_overs_other():
+    """Jedna zakładka: live i przed meczem, tenis / siatka / kosz / hokej."""
+    with LOCK:
+        res, t, job = OTHER_OVERS_STATE["res"], OTHER_OVERS_STATE["t"], OTHER_OVERS_STATE["job"]
+        fresh = bool(res and not res.get("partial") and t and time.time() - t < OTHER_OVERS_TTL)
+        if not fresh and job is None:
+            job = OTHER_OVERS_STATE["job"] = {
+                "progress": {"done": 0, "total": 0},
+                "started": time.time(), "beat": time.time(), "cancel": False,
+            }
+            threading.Thread(target=_other_overs_worker, args=(job,), daemon=True).start()
+    if res is not None:
+        out = dict(res)
+        status = "computing" if job and not fresh else "ready"
+        out.update(status=status, stale=not fresh,
+                   age_seconds=round(time.time() - t) if t else None,
+                   errors=dict(ERRORS))
+        if job:
+            out["progress"] = dict(job["progress"])
+            out["elapsed_seconds"] = round(time.time() - job["started"])
+        return out
+    return {"status": "computing",
+            "progress": dict(job["progress"]) if job else {"done": 0, "total": 0},
+            "elapsed_seconds": round(time.time() - job["started"]) if job else 0,
+            "errors": dict(ERRORS), "picks": [], "matches": [],
+            "note": "Liczą się overy tenisa, siatkówki, kosza i hokeja w tle. Nic nie jest stawiane."}
+
+
 # ---------- ranking w tle (single-flight + cache) ----------
 TTL = {"live": 180, "prematch": 600, "all": 180}
 JOBS = {}                             # klucz -> {"thread", "progress", "started"}
@@ -2505,6 +2746,9 @@ class H(BaseHTTPRequestHandler):
             except Exception as e: return self.send(500, json.dumps({"error": str(e)}), "application/json")
         if u.path in ("/api/goal-overs", "/api/goal-overs-pre"):
             try: return self.send(200, json.dumps(get_overs(), ensure_ascii=False), "application/json; charset=utf-8")
+            except Exception as e: return self.send(500, json.dumps({"error": str(e)}), "application/json")
+        if u.path in ("/api/goal-overs-other", "/api/goal-overs-inne"):
+            try: return self.send(200, json.dumps(get_overs_other(), ensure_ascii=False), "application/json; charset=utf-8")
             except Exception as e: return self.send(500, json.dumps({"error": str(e)}), "application/json")
         if u.path == "/api/ranking":
             q = dict(urllib.parse.parse_qsl(u.query))

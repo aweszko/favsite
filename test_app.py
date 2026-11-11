@@ -1371,6 +1371,9 @@ class TGoalOvers(unittest.TestCase):
         self.assertIn("similar", app.HTML)
         self.assertIn("tylko 1. połowa", app.HTML)
         self.assertIn("Nie typuję tu 2. połowy", app.HTML)
+        self.assertIn("Overy: tenis, siatka, kosz, hokej", app.HTML)
+        self.assertIn("#overy-inne", app.HTML)
+        self.assertIn("/api/goal-overs-other", app.HTML)
 
 
     def test_pre_rank_keeps_team_names_not_side_fractions(self):
@@ -1547,3 +1550,170 @@ class TGoalOvers(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TOtherOvers(unittest.TestCase):
+    def _ms(self, sport, values, field="points"):
+        out = []
+        for v in values:
+            rec = {"result": (v // 2, v - v // 2), "period_pairs": {}}
+            if sport == "tennis":
+                rec["sets"] = 2
+                rec["set_games"] = {1: 9, 2: (v - 9 if v > 9 else v)}
+                rec["games"] = v
+            elif sport == "volleyball":
+                rec["sets"] = v
+                rec["set_points"] = {1: 46, 2: 46, 3: 46}
+                rec["points"] = 138
+            elif sport == "basketball":
+                rec["points"] = v
+                rec["quarters"] = {1: 40, 2: 40, 3: 40, 4: v - 120 if v >= 120 else 30}
+                rec["h2"] = rec["quarters"][3] + rec["quarters"][4]
+            elif sport == "hockey":
+                rec["goals_final"] = v
+                rec["goals_reg"] = v
+                rec["periods"] = {1: 2, 2: 2, 3: max(0, v - 4)}
+            out.append(rec)
+        return out
+
+    def test_parse_lastx_tennis_games_skips_walkover(self):
+        import other_overs as o
+        data = {"matches": [
+            {"walkover": False, "retired": False, "result": {"home": 0, "away": 2},
+             "periods": {"ft": {"home": 0, "away": 2}, "p1": {"home": 3, "away": 6}, "p2": {"home": 2, "away": 6}}},
+            {"walkover": True, "result": {"home": 0, "away": 0},
+             "periods": {"ft": {"home": 0, "away": 0}}},
+            {"retired": 1, "result": {"home": 1, "away": 0},
+             "periods": {"p1": {"home": 6, "away": 3}}},
+        ]}
+        ms = o.parse_lastx(data, "tennis")
+        self.assertEqual(len(ms), 1)
+        self.assertEqual(ms[0]["games"], 17)
+        self.assertEqual(ms[0]["sets"], 2)
+        self.assertEqual(ms[0]["set_games"][1], 9)
+
+    def test_parse_lastx_hockey_and_basket(self):
+        import other_overs as o
+        h = o.parse_lastx({"matches": [{"result": {"home": 1, "away": 4},
+            "periods": {"ft": {"home": 1, "away": 4}, "p1": {"home": 0, "away": 1},
+                        "p2": {"home": 1, "away": 2}, "p3": {"home": 0, "away": 1}}}]}, "hockey")
+        self.assertEqual(h[0]["goals_reg"], 5)
+        self.assertEqual(h[0]["periods"][2], 3)
+        b = o.parse_lastx({"matches": [{"result": {"home": 75, "away": 71},
+            "periods": {"ft": {"home": 75, "away": 71}, "p1": {"home": 19, "away": 20},
+                        "p2": {"home": 18, "away": 20}, "p3": {"home": 14, "away": 18},
+                        "p4": {"home": 24, "away": 13}}}]}, "basketball")
+        self.assertEqual(b[0]["points"], 146)
+        self.assertEqual(b[0]["quarters"][4], 37)
+        self.assertEqual(b[0]["h2"], 69)
+
+    def test_exclude_side_with_fewer_than_8(self):
+        import other_overs as o
+        home = self._ms("basketball", [160] * 15)
+        away = self._ms("basketball", [160] * 7)
+        self.assertFalse(o.has_main_history(home, away, "basketball"))
+        ev = {"eventId": 1, "home": "A", "away": "B", "sport": "basketball", "mode": "prematch",
+              "start_warsaw": "20:00", "day_warsaw": "2026-11-12"}
+        offers = {"points_220.5": {"key": "points_220.5", "base": "points", "field": "points",
+                                   "part": None, "line": 220.5, "odds": 1.80, "unit": "punktu w meczu",
+                                   "play": "Over 220,5 punktu w meczu"}}
+        self.assertIsNone(o.match_card(home, away, ev, offers))
+
+    def test_live_conditions_on_current_total(self):
+        import other_overs as o
+        # 10 meczów z 200 pkt, 10 z 230 — przy obecnym 210 tylko te z 230 "dochodzą"
+        home = self._ms("basketball", [200] * 10 + [230] * 10)
+        away = self._ms("basketball", [200] * 10 + [230] * 10)
+        ev = {"eventId": 2, "home": "Alfa", "away": "Beta", "sport": "basketball", "mode": "live",
+              "score": "110:100", "home_score": 110, "away_score": 100,
+              "period": "4K", "minutes": 38,
+              "periods": [
+                  {"homeTeamScore": 30, "awayTeamScore": 25, "type": "FIRST_QUARTER", "num": 1},
+                  {"homeTeamScore": 25, "awayTeamScore": 25, "type": "SECOND_QUARTER", "num": 2},
+                  {"homeTeamScore": 30, "awayTeamScore": 25, "type": "THIRD_QUARTER", "num": 3},
+                  {"homeTeamScore": 25, "awayTeamScore": 25, "type": "FOURTH_QUARTER", "num": 4},
+              ]}
+        offers = {"points_220.5": {"key": "points_220.5", "base": "points", "field": "points",
+                                   "part": None, "line": 220.5, "odds": 1.70, "unit": "punktu w meczu",
+                                   "play": "Over 220,5 punktu w meczu"}}
+        card = o.match_card(home, away, ev, offers)
+        self.assertIsNotNone(card)
+        ln = card["lines"][0]
+        self.assertEqual(ln["n"], 20)  # tylko mecze, które dochodziły do 210
+        self.assertEqual(ln["k"], 20)
+        self.assertIn("210", ln["why"])
+        # linia już poniżej bieżącego wyniku nie wchodzi
+        offers2 = {"points_200.5": {"key": "points_200.5", "base": "points", "field": "points",
+                                    "part": None, "line": 200.5, "odds": 1.70, "unit": "punktu w meczu",
+                                    "play": "Over 200,5 punktu w meczu"}}
+        card2 = o.match_card(home, away, ev, offers2)
+        self.assertTrue(card2 is None or not any(x["key"]=="points_200.5" for x in card2["lines"]))
+
+    def test_rank_requires_odds_130_and_unique(self):
+        import other_overs as o
+        home = self._ms("hockey", [6] * 10)
+        away = self._ms("hockey", [6] * 10)
+        ev = {"eventId": 9, "home": "Alfa", "away": "Beta", "sport": "hockey", "mode": "prematch",
+              "start_warsaw": "19:00", "day_warsaw": "2026-11-12", "tournament": "KHL"}
+        offers = {
+            "goals_reg_5.5": {"key": "goals_reg_5.5", "base": "goals_reg", "field": "goals_reg",
+                              "part": None, "line": 5.5, "odds": 1.85, "unit": "gola w meczu",
+                              "play": "Over 5,5 gola w meczu"},
+            "goals_reg_4.5": {"key": "goals_reg_4.5", "base": "goals_reg", "field": "goals_reg",
+                              "part": None, "line": 4.5, "odds": 1.10, "unit": "gola w meczu",
+                              "play": "Over 4,5 gola w meczu"},
+        }
+        card = o.match_card(home, away, ev, offers)
+        self.assertIsNotNone(card)
+        keys = {ln["key"] for ln in card["lines"]}
+        self.assertIn("goals_reg_5.5", keys)
+        self.assertIn("goals_reg_4.5", keys)
+        ranked = o.rank_cards([card, dict(card)])
+        self.assertEqual(len(ranked), 1)
+        self.assertEqual(ranked[0]["key"], "goals_reg_5.5")
+        self.assertGreaterEqual(ranked[0]["odds"], 1.30 - 1e-9)
+        self.assertEqual(ranked[0]["home"], "Alfa")
+        self.assertIsInstance(ranked[0]["home"], str)
+        self.assertIn("Szansa na wygraną zakładu", ranked[0]["summary"])
+        self.assertIn("Alfa", ranked[0]["summary"])
+
+    def test_parse_odds_skips_combos_and_handicaps(self):
+        import other_overs as o
+        odds = [
+            {"marketName": "Liczba gemów", "name": "Powyżej 21.5", "price": 1.50, "status": "active"},
+            {"marketName": "2. set - liczba gemów", "name": "Powyżej 9.5", "price": 1.80, "status": "active"},
+            {"marketName": "Mecz & liczba gemów", "name": "2 & powyżej 21.5", "price": 1.78, "status": "active"},
+            {"marketName": "Handicap gemy", "name": "Ashleigh Harvey (-3.5)", "price": 1.14, "status": "active"},
+            {"marketName": "Liczba gemów", "name": "Poniżej 21.5", "price": 2.25, "status": "active"},
+            {"marketName": "Liczba gemów", "name": "Powyżej 22.5", "price": 3.05, "status": "block"},
+        ]
+        got = o.parse_other_odds(odds, "tennis")
+        self.assertIn("games_21.5", got)
+        self.assertEqual(got["games_21.5"]["odds"], 1.50)
+        self.assertIn("set_games_2_9.5", got)
+        self.assertNotIn("games_22.5", got)
+        self.assertEqual(len(got), 2)
+
+    def test_empty_lastx_excluded(self):
+        import other_overs as o
+        home = o.parse_lastx({"matches": []}, "volleyball")
+        away = self._ms("volleyball", [5] * 15, "sets")
+        self.assertFalse(o.has_main_history(home, away, "volleyball"))
+
+    def test_simple_polish_no_jargon(self):
+        import other_overs as o
+        home = self._ms("tennis", [22] * 12)
+        away = self._ms("tennis", [22] * 12)
+        ev = {"eventId": 3, "home": "Ada", "away": "Ewa", "sport": "tennis", "mode": "prematch",
+              "start_warsaw": "18:00", "day_warsaw": "2026-11-12"}
+        offers = {"games_21.5": {"key": "games_21.5", "base": "games", "field": "games",
+                                 "part": None, "line": 21.5, "odds": 1.60, "unit": "gema w meczu",
+                                 "play": "Over 21,5 gema w meczu"}}
+        card = o.match_card(home, away, ev, offers)
+        self.assertIsNotNone(card)
+        txt = (card["lines"][0].get("summary") or "") + " " + (card["lines"][0].get("why") or "")
+        self.assertIn("Szansa na wygraną zakładu", txt)
+        self.assertIn("Co zagrać", txt)
+        self.assertNotIn("Poisson", txt)
+        self.assertNotIn("implied", txt.lower())
+        self.assertNotRegex(txt, r"\bpp\b")
