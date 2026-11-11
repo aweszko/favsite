@@ -93,9 +93,18 @@ input:focus,button:focus-visible{outline:2px solid var(--g);outline-offset:1px}.
 @keyframes shm{to{background-position:-200% 0}}.pg{height:6px;border-radius:4px;background:#222;overflow:hidden;margin:12px 0 6px}.pg i{display:block;height:100%;background:var(--gg);transition:width .5s}
 .lg2{display:flex;gap:10px;font-size:11px;color:var(--s);margin:2px 0}.lg2 i{display:inline-block;width:9px;height:9px;border-radius:2px;margin-right:3px;vertical-align:-1px}
 .nf{margin:10px 0 16px;padding:12px;border:1px solid #2f2710;border-radius:14px;background:#14110a}.nf h3{margin:0 0 8px;font-size:13px;color:var(--g3)}.nf ol{margin:0;padding-left:18px;font-size:12px;color:var(--s)}.nf li{margin:3px 0}.nf b{color:var(--g3)}.nc{border:1px solid #3a3014;border-radius:16px;padding:14px;margin:0 0 12px;background:linear-gradient(180deg,#1a150c,#120e08)}.nc.hot{border-color:#c9a227;box-shadow:0 0 0 1px #c9a22744}.nc .tip{font-size:16px;font-weight:800;color:var(--g3);margin:6px 0 10px}.nc .meta{font-size:12px;color:var(--s);display:flex;flex-wrap:wrap;gap:8px}.nc .kv{display:grid;grid-template-columns:repeat(auto-fit,minmax(90px,1fr));gap:8px;margin-top:10px}.nc .kv b{display:block;font-size:16px;color:var(--g)}.nc .kv small{color:var(--s)}
+.oc{border:1px solid #3a3014;border-radius:16px;padding:14px;margin:0 12px 12px;background:linear-gradient(180deg,#1a150c,#120e08)}
+.oc.hot{border-color:#c9a227;box-shadow:0 0 0 1px #c9a22744}
+.oc .oh{display:flex;justify-content:space-between;align-items:flex-start;gap:10px}
+.oc .chp{font-size:28px;font-weight:800;color:var(--g);letter-spacing:-.03em;line-height:1;white-space:nowrap}
+.oc .chp small{display:block;font-size:11px;color:var(--s);font-weight:600;letter-spacing:0;margin-top:2px}
+.oc .mt{font-size:13px;color:var(--s)}.oc .mt b{color:var(--g3);font-size:15px}
+.oc .play{font-size:17px;font-weight:800;color:var(--g3);margin:8px 0 6px}
+.oc .row{font-size:13px;margin:3px 0;color:var(--t)}.oc .row b{color:var(--g3);font-weight:700;margin-right:4px}
+.oc .warn{font-size:12px;color:#e8b56a;margin-top:8px}
 </style></head><body>
 <header><div class="top"><div class="brand"><img src="/icon.png" alt="Triumfator – herb" width="48" height="48"><div class="tx"><h1>Triumfator</h1><div class="sub">Porównywarka statystyk piłkarskich</div></div></div><span id="clk" class="tm"></span></div>
-<div class="main"><button data-v="list" class="on">Mecze</button><button data-v="rank">Ranking</button><button data-v="vip">VIP</button><button data-v="pro" class="pb">Pewniaki PRO</button><button data-v="worst">Dziurawe obrony</button><button data-v="next">Następny gol</button></div>
+<div class="main"><button data-v="list" class="on">Mecze</button><button data-v="rank">Ranking</button><button data-v="vip">VIP</button><button data-v="pro" class="pb">Pewniaki PRO</button><button data-v="worst">Dziurawe obrony</button><button data-v="next">Następny gol</button><button data-v="overs">Overy goli</button></div>
 <div class="tabs" id="tabs"></div></header>
 <div id="st">Ładowanie…</div>
 <div id="list"></div>
@@ -108,6 +117,7 @@ input:focus,button:focus-visible{outline:2px solid var(--g);outline-offset:1px}.
 <div id="pro" hidden><div class="vnote">Pewniaki PRO · Etap 1: lista obserwowanych (kryteria ost. 5) · Etap 2: typ dopiero LIVE przy pełnej dominacji i presji w ost. 10 min · <b>Typy to spełnione kryteria, nie gwarancja</b></div><div id="pp"></div></div>
 <div id="worst" hidden><div class="vnote">Dziurawe obrony · tylko mecze LIVE · temperatura obrony z ost. 5 meczów (5/5) z korektą siły rywala · <b>forma, nie gwarancja</b></div><div id="wp"></div></div>
 <div id="next" hidden><div class="vnote">Następny gol · twarde sita na top 3 · rywal dziurawej strzeli <b>następnego</b> gola · forma + presja teraz, nie gwarancja · brak kolejnego gola = pudło</div><div id="np"></div></div>
+<div id="overs" hidden><div class="vnote">Overy goli · najpewniejsze schematy z minut goli (ost. 10–15 meczów) · szansa = częstość Laplace + Poisson · <b>forma, nie gwarancja</b></div><div id="op"></div></div>
 <footer>Źródła: Superbet PL (oferta, kursy 1X2), Sportradar (statystyki strzałów). Godziny: Europe/Warsaw. Brak danych = „brak danych”, nic nie jest szacowane.</footer>
 <script>
 const $=s=>document.querySelector(s);let view='list',tab='live',rmode='all',M=null,R=null,open={};
@@ -118,7 +128,7 @@ function addDay(s,n){const d=new Date(s+'T12:00:00Z');d.setUTCDate(d.getUTCDate(
 function listTabs(){if(!M)return[];const t=M.today_warsaw,now=M.now_ts,L=M.matches,pre=L.filter(m=>m.mode!='live');
 const T=[['live','Live',L.filter(m=>m.mode=='live')],['h1','Za 1 godz.',pre.filter(m=>m.ts-now<=36e5)],['h3','Za 3 godz.',pre.filter(m=>m.ts-now<=108e5)],['d0','Dziś',pre.filter(m=>m.day_warsaw==t)],['d1','Jutro',pre.filter(m=>m.day_warsaw==addDay(t,1))]];
 for(let i=2;i<7;i++){const d=addDay(t,i),dd=new Date(d+'T12:00:00Z');T.push(['d'+i,DN[dd.getUTCDay()]+' '+d.slice(8)+'.'+d.slice(5,7),pre.filter(m=>m.day_warsaw==d)])}return T}
-function drawTabs(){const el=$('#tabs');if(view=='vip'||view=='pro'){el.innerHTML='';return}if(view=='worst'||view=='next'){el.innerHTML='';return}if(view=='list'){el.innerHTML=listTabs().map(([k,n,a])=>`<button data-t="${k}" class="${k==tab?'on':''}">${n}<span class="cnt">${a.length}</span></button>`).join('')}
+function drawTabs(){const el=$('#tabs');if(view=='vip'||view=='pro'){el.innerHTML='';return}if(view=='worst'||view=='next'||view=='overs'){el.innerHTML='';return}if(view=='list'){el.innerHTML=listTabs().map(([k,n,a])=>`<button data-t="${k}" class="${k==tab?'on':''}">${n}<span class="cnt">${a.length}</span></button>`).join('')}
 else el.innerHTML=[['live','Live'],['prematch','Przedmeczowe (dziś)'],['all','Wszystkie']].map(([k,n])=>`<button data-r="${k}" class="${k==rmode?'on':''}">${n}</button>`).join('');
 el.querySelectorAll('[data-t]').forEach(b=>b.onclick=()=>{tab=b.dataset.t;drawTabs();drawList();scrollTo(0,0)});
 el.querySelectorAll('[data-r]').forEach(b=>b.onclick=()=>{rmode=b.dataset.r;drawTabs();loadRank()})}
@@ -159,7 +169,7 @@ let rt=null;async function loadRank(){clearTimeout(rt);if(!R||R.status!='computi
 const q=new URLSearchParams({mode:rmode,min_games:$('#mg').value,odds_min:$('#omin').value.replace(',','.'),odds_max:$('#omax').value.replace(',','.')});
 try{R=await (await fetch('/api/ranking?'+q)).json();drawRank();if(R.status=='computing'&&view=='rank')rt=setTimeout(loadRank,4000)}catch(e){$('#st').innerHTML='<span class="err">Błąd: '+esc(e)+'</span>';rt=setTimeout(loadRank,5000)}}
 document.querySelectorAll('[data-v]').forEach(b=>b.onclick=()=>{view=b.dataset.v;document.querySelectorAll('[data-v]').forEach(x=>x.classList.toggle('on',x==b));
-$('#list').hidden=view!='list';$('#rank').hidden=view!='rank';$('#vip').hidden=view!='vip';$('#pro').hidden=view!='pro';$('#worst').hidden=view!='worst';$('#next').hidden=view!='next';drawTabs();if(view=='worst'||view=='next'){W?(view=='worst'?drawWorst():drawNext()):0;loadWorst()}else if(view=='pro'){P?drawPro():0;loadPro()}else if(view=='rank'){R?drawRank():loadRank()}else if(view=='vip'){V?drawVip():0;loadVip()}else if(M)status(M)});
+$('#list').hidden=view!='list';$('#rank').hidden=view!='rank';$('#vip').hidden=view!='vip';$('#pro').hidden=view!='pro';$('#worst').hidden=view!='worst';$('#next').hidden=view!='next';$('#overs').hidden=view!='overs';drawTabs();if(view=='worst'||view=='next'){W?(view=='worst'?drawWorst():drawNext()):0;loadWorst()}else if(view=='overs'){O?drawOvers():0;loadOvers()}else if(view=='pro'){P?drawPro():0;loadPro()}else if(view=='rank'){R?drawRank():loadRank()}else if(view=='vip'){V?drawVip():0;loadVip()}else if(M)status(M)});
 ['#mg','#omin','#omax'].forEach(s=>$(s).onchange=loadRank);
 setInterval(()=>{$('#clk').textContent=new Date().toLocaleTimeString('pl-PL',{timeZone:'Europe/Warsaw',hour:'2-digit',minute:'2-digit'})},1000);
 if(location.hash=='#najslabsi'||location.hash=='#dziurawe')document.querySelector('[data-v=worst]').click();
@@ -167,6 +177,7 @@ if(location.hash=='#nastepny')document.querySelector('[data-v=next]').click();
 if(location.hash=='#pro')document.querySelector('[data-v=pro]').click();
 if(location.hash=='#vip')document.querySelector('[data-v=vip]').click();
 if(location.hash=='#ranking')document.querySelector('[data-v=rank]').click();
+if(location.hash=='#overy'||location.hash=='#overy-goli'||location.hash=='#gole')document.querySelector('[data-v=overs]').click();
 loadList();setInterval(()=>view=='list'?loadList():view=='rank'?loadRank():0,60000);
 let V=null,vt=null;
 const fv=x=>x==null?'–':typeof x=='number'?f(x,x%1?2:0):esc(x);
@@ -301,6 +312,34 @@ setInterval(wstatus,5000);
 async function loadWorst(){clearTimeout(wt);WB=true;wstatus();const ac=new AbortController(),to=setTimeout(()=>ac.abort(),25000);
 try{const d=await (await fetch('/api/worst?_='+Date.now(),{cache:'no-store',signal:ac.signal})).json();if(d.status=='ready'||!W||W.status!='ready'){W=d;WT=Date.now();if(view=='next')drawNext();else drawWorst()}}catch(e){$('#st').innerHTML='<span class="err">Błąd: '+esc(e)+' – ponawiam</span>'}
 clearTimeout(to);WB=false;wstatus();if(view=='worst'||view=='next')wt=setTimeout(loadWorst,W&&W.status=='computing'?4000:60000)}
+
+let O=null,ot=null;
+function drawOvers(){if(!O)return;
+if(O.status=='computing'&&!(O.picks&&O.picks.length)){const p=O.progress||{};$('#op').innerHTML='<div class="empty">Liczą się overy w tle… ('+(p.done||0)+'/'+(p.total||'?')+'). Pierwsze liczenie może potrwać kilka minut — strona nie blokuje się.</div>';return}
+const P=O.picks||[];
+const pf=x=>x==null?'–':(Math.round(100*x)+'%').replace(' ','');
+function card(c){
+ const warn=(c.warnings&&c.warnings.length)?'<div class="warn">⚠ '+c.warnings.map(esc).join(' · ')+'</div>':'';
+ const emp=c.p_emp==null?'–':Math.round(100*c.p_emp)+'%';
+ const poi=c.p_pois==null?'–':Math.round(100*c.p_pois)+'%';
+ const when=(c.day_warsaw?esc(c.day_warsaw.slice(5))+' ':'')+esc(c.start_warsaw||'');
+ const lg=[c.category,c.tournament].filter(Boolean).join(' · ');
+ return `<div class="oc${c.rank<=3?' hot':''}"><div class="oh"><div class="mt">${when}${lg?' · '+esc(lg):''}<br><b>${esc(c.home||c.home_name||'')} – ${esc(c.away||c.away_name||'')}</b></div><div class="chp">${c.chance_pct??'–'}%<small>Szansa: ok. ${c.chance_pct??'–'}%</small></div></div>
+<div class="play">Co zagrać: ${esc(c.play)}</div>
+<div class="row"><b>Kiedy wejść:</b> ${esc(c.enter)}</div>
+<div class="row"><b>Dlaczego:</b> ${esc(c.why)}.</div>
+<div class="row"><b>Szansa:</b> ok. ${c.chance_pct??'–'}% · ułamek ${esc(c.frac||'–')} · częstość wygładzona ${emp} · Poisson ${poi}${c.conditional?' · szansa warunkowa':''}</div>
+${warn}</div>`}
+let h='<div class="nf"><h3>Najpewniejsze overy dnia</h3></div>';
+h+=P.length?P.map(card).join(''):'<div class="empty">Brak wystarczająco mocnych schematów (min. 8 meczów i szansa ≥ 70%).</div>';
+h+=`<div class="hfoot">${esc(O.note||'')}<br>Sprawdzonych meczów: ${(O.footer&&O.footer.matches)||0} · za słabe: ${(O.footer&&O.footer.too_weak)||0} · bez danych: ${(O.footer&&O.footer.without_stats)||0}<details style="margin-top:6px;text-align:left"><summary>Jak liczona jest szansa</summary>${esc(O.rule||'')}</details></div>`;
+$('#op').innerHTML=h;
+const e=Object.entries(O.errors||{});
+$('#st').innerHTML=`Aktualizacja: ${esc(O.generated_warsaw||'')} (Warszawa)`+(O.stale?' · odświeżam w tle':'')+(O.status=='computing'?' · liczę kolejną rundę…':'')+(e.length?`<div class="err">Błąd źródła: ${esc(e.map(x=>x.join(': ')).join('; '))}</div>`:'')}
+async function loadOvers(){clearTimeout(ot);
+try{O=await (await fetch('/api/goal-overs?_='+Date.now(),{cache:'no-store'})).json();if(view=='overs')drawOvers()}catch(e){if(view=='overs')$('#st').innerHTML='<span class="err">Błąd: '+esc(e)+'</span>'}
+if(view=='overs')ot=setTimeout(loadOvers,O&&O.status=='computing'?4000:60000)}
+
 document.addEventListener('visibilitychange',()=>{if(!document.hidden&&(view=='worst'||view=='next')&&(Date.now()-WT)>30000)loadWorst()});
 window.addEventListener('focus',()=>{if((view=='worst'||view=='next')&&(Date.now()-WT)>30000)loadWorst()});
 </script></body></html>

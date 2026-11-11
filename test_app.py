@@ -834,5 +834,126 @@ class TestNextGoalTips(unittest.TestCase):
         self.assertIn("presja LIVE (udział", app.HTML)
 
 
+class TGoalOvers(unittest.TestCase):
+    """Szansa z danych (Laplace + Poisson), bez zmyślonych liczb."""
+    def _mv(self, uid, is_home, totals_2h, tot=None, ht=None, late=0, gf_2h=None, goals=None):
+        # totals_2h: gole w 2H całego meczu; tot: gole w meczu; ht: (ht_h, ht_a) from home view raw
+        if ht is None:
+            # domyślnie 0:0 do przerwy, całość = 2H
+            ht = (0, 0)
+        if tot is None:
+            tot = (ht[0] + (totals_2h if False else 0), ht[1])
+        # prostszy konstruktor: podajemy listę minut goli 'home'/'away'
+        return goals
+
+    def test_bucket_and_half(self):
+        import goal_overs as g
+        self.assertEqual(g.bucket(1), "0-15")
+        self.assertEqual(g.bucket(15), "0-15")
+        self.assertEqual(g.bucket(16), "16-30")
+        self.assertEqual(g.bucket(45), "31-45+")
+        self.assertEqual(g.bucket(46), "46-60")
+        self.assertEqual(g.bucket(75), "61-75")
+        self.assertEqual(g.bucket(76), "76-90+")
+        self.assertEqual(g.bucket(90), "76-90+")
+        self.assertEqual(g.half_of(45), 1)
+        self.assertEqual(g.half_of(46), 2)
+        self.assertIsNone(g.bucket(0))
+
+    def test_laplace_and_poisson(self):
+        import goal_overs as g
+        self.assertAlmostEqual(g.laplace(9, 10), 10/12)
+        self.assertAlmostEqual(g.pois_over(0.5, 0.0), 0.0)
+        self.assertAlmostEqual(g.pois_over(0.5, 1.0), 1 - pow(2.718281828, -1), places=3)
+        self.assertAlmostEqual(g.pois_over(1.5, 0.0), 0.0)
+        # combine wagi 0.55 / 0.45
+        p = g.combine(0.8, 0.6)
+        self.assertAlmostEqual(p, 0.55*0.8 + 0.45*0.6)
+
+    def test_extract_goals_uses_result_delta(self):
+        import goal_overs as g
+        evs = [
+            {"type": "goal", "time": 12, "injurytime": 0, "team": "away", "owngoal": True,
+             "result": {"home": 1, "away": 0}, "seconds": 700},
+            {"type": "goal", "time": 70, "injurytime": 0, "team": "away",
+             "result": {"home": 1, "away": 1}, "seconds": 4200},
+            {"type": "goal_kick", "time": 20, "team": "home"},
+            {"type": "goal", "time": 88, "disabled": 1, "team": "home", "result": {"home": 2, "away": 1}},
+        ]
+        goals, ft = g.extract_goals(evs)
+        self.assertEqual(len(goals), 2)
+        self.assertEqual(goals[0]["scored"], "home")  # samobój, result 1:0
+        self.assertEqual(goals[0]["half"], 1)
+        self.assertEqual(goals[1]["scored"], "away")
+        self.assertEqual(goals[1]["bucket"], "61-75")
+        self.assertEqual(ft, (1, 1))
+
+    def _game(self, uid, is_home, goals_sides_minutes, p1=None, ft=None):
+        import goal_overs as g
+        mapped = [{"minute": m, "injury": 0, "half": 1 if m <= 45 else 2,
+                   "bucket": g.bucket(m), "scored": s, "owngoal": False}
+                  for s, m in goals_sides_minutes]
+        if ft is None:
+            ft = (sum(1 for s,_ in goals_sides_minutes if s=="home"),
+                  sum(1 for s,_ in goals_sides_minutes if s=="away"))
+        if p1 is None:
+            p1 = (sum(1 for s,m in goals_sides_minutes if s=="home" and m<=45),
+                  sum(1 for s,m in goals_sides_minutes if s=="away" and m<=45))
+        return g.match_view(uid, is_home, mapped, ft=ft, p1=p1, timeline_ok=True)
+
+    def test_over05_2h_high_frequency(self):
+        import goal_overs as g
+        # 10 meczów obu drużyn, w 9/10 gol w 2H (minuta 60 gospodarz)
+        def pack(uid, is_home_list):
+            ms = []
+            for i in range(10):
+                # 9 meczów z golem w 2H, 1 bez (0:0)
+                if i < 9:
+                    gs = [("home", 60)]
+                else:
+                    gs = []
+                ms.append(self._game(uid, True, gs))
+            return g.team_profile(uid, ms, name="A" if uid=="h" else "B")
+        h = pack("h", None); a = pack("a", None)
+        h["name"]="Alfa"; a["name"]="Beta"
+        card = g.pick_for_match(h, a, {"start_warsaw":"19:00","home":"Alfa","away":"Beta","ts":1})
+        self.assertIsNotNone(card)
+        self.assertEqual(card["frac"], "18/20")
+        self.assertGreaterEqual(card["chance"], 0.70)
+        self.assertIn("2. połowie", card["play"])
+        self.assertEqual(card["chance_pct"], int(round(100*card["chance"])))
+        # surowa częstość 18/20 = 0.9; Laplace 19/22
+        self.assertAlmostEqual(card["p_raw"], 0.9)
+        self.assertAlmostEqual(card["p_emp"], 19/22)
+
+    def test_no_pick_when_sample_small_or_weak(self):
+        import goal_overs as g
+        ms = [self._game("h", True, [("home", 80)]) for _ in range(5)]  # tylko 5
+        h = g.team_profile("h", ms, name="A")
+        a = g.team_profile("a", ms, name="B")
+        self.assertIsNone(g.pick_for_match(h, a, {}))
+        # duża próba, ale rzadki gol w 2H
+        ms2 = [self._game("h", True, [("home", 10)]) for _ in range(12)]  # tylko 1H
+        h2 = g.team_profile("h", ms2, name="A")
+        a2 = g.team_profile("a", ms2, name="B")
+        self.assertIsNone(g.pick_for_match(h2, a2, {}))
+
+    def test_rank_by_chance(self):
+        import goal_overs as g
+        cards = [{"chance": 0.81, "n": 10, "ts": 2}, {"chance": 0.88, "n": 8, "ts": 1},
+                 {"chance": 0.81, "n": 16, "ts": 3}]
+        r = g.rank_picks(cards, limit=3)
+        self.assertEqual([c["n"] for c in r], [8, 16, 10])
+        self.assertEqual(r[0]["chance"], 0.88)
+        self.assertEqual(r[0]["rank"], 1)
+
+    def test_html_has_overs_tab(self):
+        self.assertIn("Overy goli", app.HTML)
+        self.assertIn("#overy", app.HTML)
+        self.assertIn("/api/goal-overs", app.HTML)
+        self.assertIn("Najpewniejsze overy dnia", app.HTML)
+        self.assertIn("Szansa:", app.HTML)
+
+
 if __name__ == "__main__":
     unittest.main()

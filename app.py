@@ -6,6 +6,7 @@ Tylko biblioteka standardowa Pythona 3.9+. Uruchom: python app.py -> http://loca
 import json, os, sys, time, threading, urllib.request, urllib.parse, webbrowser
 from concurrent.futures import ThreadPoolExecutor
 import next_goal
+import goal_overs
 from datetime import datetime, timedelta, timezone
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 
@@ -1498,6 +1499,182 @@ def get_worst(mode="all"):
     return {"status": "computing", "progress": dict(job["progress"]), "elapsed_seconds": round(time.time() - job["started"]),
             "errors": dict(ERRORS)}
 
+
+# ---------- Overy goli (minuty z ost. 10–15 meczów, liczone w tle) ----------
+OVERS_TTL = 600
+OVERS_JOB_MAX = 600
+OVERS_TL_MAX = 400
+OVERS_MATCH_MAX = 50
+OVERS_STATE = {"res": None, "t": 0, "job": None}
+
+def _tl_goals(mid):
+    """Timeline zakończonego meczu (cache 7 dni — wynik się nie zmienia)."""
+    def f():
+        d = gismo("match_timeline/%s" % mid)
+        return d if isinstance(d, dict) else ({} if d is not None else None)
+    return cached("tlgoal:%s" % mid, 7 * 24 * 3600, f)
+
+def _pair_score(d):
+    if not d or d.get("home") is None or d.get("away") is None:
+        return None
+    h, a = to_int(d.get("home")), to_int(d.get("away"))
+    if h is None or a is None:
+        return None
+    return h, a
+
+def team_goal_views(uid, exclude_br=None):
+    """Ost. 15 meczów drużyny z minutami goli (albo choćby p1/ft)."""
+    def f():
+        d = lastx_raw(uid)
+        if not d:
+            return None
+        ms = []
+        for x in _done(d)[:15]:
+            mid = x.get("_id")
+            if exclude_br and str(mid) == str(exclude_br):
+                continue
+            th, ta = (x.get("teams") or {}).get("home") or {}, (x.get("teams") or {}).get("away") or {}
+            is_home = str(th.get("uid")) == str(uid)
+            per = x.get("periods") or {}
+            ft = _pair_score(per.get("ft") or x.get("result"))
+            p1 = _pair_score(per.get("p1"))
+            tl = _tl_goals(mid)
+            goals, ft_g = [], None
+            tl_ok = False
+            if tl:
+                goals, ft_g = goal_overs.extract_goals(tl.get("events") or [])
+                tl_ok = True
+                if ft and goals and (ft[0] + ft[1]) != len(goals):
+                    tl_ok = False
+            mv = goal_overs.match_view(
+                uid, is_home, goals if tl_ok else [], ft=ft or ft_g, p1=p1,
+                timeline_ok=tl_ok, mid=mid,
+                opp_uid=(ta if is_home else th).get("uid"),
+                uts=(x.get("time") or {}).get("uts"))
+            if not tl_ok and p1 and ft:
+                mv["gf_ht"] = p1[0] if is_home else p1[1]
+                mv["ga_ht"] = p1[1] if is_home else p1[0]
+                mv["tot_1h"] = p1[0] + p1[1]
+                mv["tot_2h"] = (ft[0] + ft[1]) - (p1[0] + p1[1])
+                mv["any_2h"] = mv["tot_2h"] >= 1
+                mv["gf_1h"] = mv["gf_ht"]
+                mv["gf_2h"] = (mv["gf"] or 0) - mv["gf_ht"]
+                mv["ga_1h"] = mv["ga_ht"]
+                mv["ga_2h"] = (mv["ga"] or 0) - mv["ga_ht"]
+                mv["scored_2h"] = mv["gf_2h"] >= 1
+                mv["ht_00"] = mv["tot_1h"] == 0
+                mv["ht_le1"] = mv["tot_1h"] <= 1
+            ms.append(mv)
+        return ms
+    return cached("gviews:%s:%s" % (uid, exclude_br or ""), TEAM_TTL, f)
+
+def _overs_window(now_utc=None):
+    now_utc = now_utc or datetime.now(timezone.utc)
+    today = to_warsaw(now_utc).strftime("%Y-%m-%d")
+    tomorrow = (to_warsaw(now_utc) + timedelta(days=1)).strftime("%Y-%m-%d")
+    evs = [e for e in (get_list("prematch") or [])
+           if e.get("day_warsaw") in (today, tomorrow) and e.get("br")]
+    evs.sort(key=lambda e: e.get("ts") or 0)
+    return evs[:OVERS_MATCH_MAX], today, tomorrow
+
+def build_overs(progress=None):
+    evs, today, tomorrow = _overs_window()
+    if progress is not None:
+        progress.update(done=0, total=len(evs))
+    cards, skipped = [], {"nobr": 0, "nostats": 0, "thin": 0}
+
+    def one(ev):
+        try:
+            mi = match_info(ev["br"])
+            if not mi:
+                return ("nostats", None)
+            hu = (mi.get("home") or {}).get("uid")
+            au = (mi.get("away") or {}).get("uid")
+            if not hu or not au:
+                return ("nostats", None)
+            hv = team_goal_views(hu, ev.get("br"))
+            av = team_goal_views(au, ev.get("br"))
+            if not hv or not av:
+                return ("nostats", None)
+            hp = goal_overs.team_profile(str(hu), hv, name=ev.get("home") or (mi["home"] or {}).get("name"))
+            ap = goal_overs.team_profile(str(au), av, name=ev.get("away") or (mi["away"] or {}).get("name"))
+            meta = dict(eventId=ev.get("eventId"), start_warsaw=ev.get("start_warsaw"),
+                        day_warsaw=ev.get("day_warsaw"), ts=ev.get("ts"),
+                        home=ev.get("home"), away=ev.get("away"),
+                        home_name=ev.get("home"), away_name=ev.get("away"),
+                        tournament=ev.get("league") or mi.get("tournament"),
+                        category=ev.get("country") or mi.get("category"),
+                        mode=ev.get("mode") or "prematch", minutes=ev.get("minutes"),
+                        score=ev.get("score"), br=ev.get("br"),
+                        start_pl=("%s %s" % (ev.get("day_warsaw") or "", ev.get("start_warsaw") or "")).strip())
+            card = goal_overs.pick_for_match(hp, ap, meta)
+            return ("ok", card)
+        except Exception as ex:
+            ERRORS["overy"] = "%s: %s" % (type(ex).__name__, ex)
+            return ("nostats", None)
+
+    # po kolei (timeline i tak jest w cache); postęp po meczach
+    # równolegle 4, jak dziurawe — semafor HTTP i tak ogranicza
+    with ThreadPoolExecutor(4) as ex:
+        res = list(ex.map(one, evs))
+        if progress is not None:
+            with LOCK:
+                progress["done"] = len(evs)
+    for ev, (st, card) in zip(evs, res):
+        if st != "ok":
+            skipped[st] = skipped.get(st, 0) + 1
+        elif card:
+            cards.append(card)
+        else:
+            skipped["thin"] += 1
+    picks = [goal_overs.public_card(c) for c in goal_overs.rank_picks(cards, limit=goal_overs.MAX_PICKS)]
+    now = datetime.now(timezone.utc)
+    return {
+        "generated_warsaw": to_warsaw(now).strftime("%Y-%m-%d %H:%M:%S"),
+        "today_warsaw": today, "tomorrow_warsaw": tomorrow,
+        "picks": picks, "n_picks": len(picks),
+        "footer": {"matches": len(evs), "without_stats": skipped.get("nostats", 0),
+                   "too_weak": skipped.get("thin", 0), "min_n": goal_overs.MIN_N,
+                   "p_min": goal_overs.P_MIN},
+        "rule": goal_overs.CHANCE_RULE,
+        "note": "Tylko mocne schematy (min. 8 meczów, szansa łączona ≥ 70%). Forma, nie gwarancja. Nic nie jest stawiane.",
+    }
+
+def _overs_worker(prog):
+    try:
+        res = build_overs(prog)
+        with LOCK:
+            OVERS_STATE.update(res=res, t=time.time())
+            ERRORS.pop("overy_job", None)
+    except Exception as e:
+        ERRORS["overy"] = "%s: %s" % (type(e).__name__, e)
+    finally:
+        with LOCK:
+            if OVERS_STATE["job"] is not None and OVERS_STATE["job"]["progress"] is prog:
+                OVERS_STATE["job"] = None
+
+def get_overs():
+    """Zwraca cache natychmiast; liczenie tylko w tle (darmowy CPU nie wisi na żądaniu)."""
+    with LOCK:
+        res, t, job = OVERS_STATE["res"], OVERS_STATE["t"], OVERS_STATE["job"]
+        fresh = res is not None and time.time() - t < OVERS_TTL
+        if job is not None and time.time() - job["started"] > OVERS_JOB_MAX:
+            ERRORS["overy_job"] = "liczenie > %d s – restart" % OVERS_JOB_MAX
+            job = OVERS_STATE["job"] = None
+        if not fresh and job is None:
+            job = OVERS_STATE["job"] = {"progress": {"done": 0, "total": 0}, "started": time.time()}
+            threading.Thread(target=_overs_worker, args=(job["progress"],), daemon=True).start()
+    if res is not None:
+        out = dict(res)
+        out.update(status="ready", stale=not fresh, age_seconds=round(time.time() - t), errors=dict(ERRORS))
+        if job:
+            out["progress"] = dict(job["progress"])
+        return out
+    return {"status": "computing", "progress": dict(job["progress"]),
+            "elapsed_seconds": round(time.time() - job["started"]), "errors": dict(ERRORS),
+            "picks": []}
+
+
 # ---------- ranking w tle (single-flight + cache) ----------
 TTL = {"live": 180, "prematch": 600, "all": 180}
 JOBS = {}                             # klucz -> {"thread", "progress", "started"}
@@ -1523,7 +1700,7 @@ REFRESH_STATE = {"last": 0.0}
 
 def refresh_tick():
     """Jedno przejście odświeżacza: uruchamia przeliczenie przeterminowanych rankingów (bez czekania)."""
-    for fn in (lambda: get_ranking("all"), lambda: get_ranking("all", 3, *VIP_RULES["odds_range"]), get_worst):
+    for fn in (lambda: get_ranking("all"), lambda: get_ranking("all", 3, *VIP_RULES["odds_range"]), get_worst, get_overs):
         try: fn()
         except Exception as e: print("[refresh] %s: %s" % (type(e).__name__, e), file=sys.stderr)
     REFRESH_STATE["last"] = time.time()
@@ -1634,6 +1811,9 @@ class H(BaseHTTPRequestHandler):
                 d = ng_get_tip(tip_id)
                 if not d: return self.send(404, json.dumps({"error": "nie znaleziono typu"}), "application/json; charset=utf-8")
                 return self.send(200, json.dumps(d, ensure_ascii=False), "application/json; charset=utf-8")
+            except Exception as e: return self.send(500, json.dumps({"error": str(e)}), "application/json")
+        if u.path == "/api/goal-overs":
+            try: return self.send(200, json.dumps(get_overs(), ensure_ascii=False), "application/json; charset=utf-8")
             except Exception as e: return self.send(500, json.dumps({"error": str(e)}), "application/json")
         if u.path == "/api/ranking":
             q = dict(urllib.parse.parse_qsl(u.query))
