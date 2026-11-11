@@ -1399,6 +1399,7 @@ class TGoalOvers(unittest.TestCase):
         self.assertIn("Brak dobrego kuponu teraz", app.HTML)
         self.assertIn("let view='kupon'", app.HTML)
         self.assertLess(app.HTML.find('data-v="kupon"'), app.HTML.find('data-v="list"'))
+        self.assertIn("d.factors", app.HTML)
 
 
     def test_pre_rank_keeps_team_names_not_side_fractions(self):
@@ -1571,6 +1572,86 @@ class TGoalOvers(unittest.TestCase):
     def test_history_capped_for_free_plan(self):
         self.assertEqual(app.OVERS_HISTORY, 10)
         self.assertLessEqual(app.OVERS_MATCH_MAX, 50)
+
+
+    def test_live_1h_base_is_not_raw_history_and_needs_odds_for_tak(self):
+        import goal_overs as g
+        # historia: gol w 1H zawsze (8. minuta) — surowa częstość ~100%
+        ms = [self._game("h", True, [("home", 8)]) for _ in range(10)]
+        h = g.team_profile("h", ms, name="Alfa (K)")
+        a = g.team_profile("a", ms, name="Beta (K)")
+        meta = {"minutes": 3, "score": "0:0", "period": "1P", "mode": "live",
+                "tournament": "UEFA - Europa Cup (K)", "home": "Alfa (K)", "away": "Beta (K)"}
+        card = g.live_match_card(h, a, meta)
+        self.assertIsNotNone(card)
+        one = next(ln for ln in card["lines"] if ln["key"] == "over05_1h")
+        raw = one["k"] / float(one["n"])
+        self.assertGreater(raw, 0.85)
+        self.assertLess(one["chance"], raw - 0.03)
+        # bez kursu: żadnego TAK, szansa ograniczona
+        card = g.apply_odds_to_match(card, {})
+        one = next(ln for ln in card["lines"] if ln["key"] == "over05_1h")
+        self.assertIsNone(one.get("verdict"))
+        self.assertNotEqual(one.get("worth"), "TAK")
+        self.assertTrue(one.get("missing_odds"))
+        self.assertLessEqual(one["chance"], g.NO_ODDS_CAP + 1e-9)
+        facts = " ".join(card.get("factors") or [])
+        self.assertIn("Brak kursu", facts)
+        self.assertTrue(any("kobie" in f.lower() or "puchar" in f.lower() or "rozgrywek" in f.lower()
+                           for f in (card.get("factors") or [])))
+        # długi kurs kotwiczy oszacowanie wyraźnie poniżej 80%
+        card2 = g.apply_odds_to_match(g.live_match_card(h, a, meta),
+                                      {"over05_1h": 2.20, "over05_1h_under": 1.70})
+        one = next(ln for ln in card2["lines"] if ln["key"] == "over05_1h")
+        self.assertLess(one["chance"], 0.80)
+        self.assertIsNotNone(one.get("implied"))
+        self.assertIn("Kurs bukmachera sugeruje", " ".join(card2.get("factors") or []))
+        self.assertLess(abs(one["chance"] - one["implied"]), abs(one["chance"] - raw))
+
+    def test_live_1h_decays_late_in_half(self):
+        import goal_overs as g
+        # historycznie gol pada późno (42') — stary model trzymałby ~80%+ także w 38. minucie
+        ms = [self._game("h", True, [("home", 42)]) for _ in range(10)]
+        h = g.team_profile("h", ms, name="Alfa")
+        a = g.team_profile("a", ms, name="Beta")
+        early = g.live_match_card(h, a, {"minutes": 3, "score": "0:0", "period": "1P", "mode": "live",
+                                         "tournament": "Ekstraklasa"})
+        late = g.live_match_card(h, a, {"minutes": 38, "score": "0:0", "period": "1P", "mode": "live",
+                                        "tournament": "Ekstraklasa"})
+        pe = next(ln for ln in early["lines"] if ln["key"] == "over05_1h")
+        pl = next(ln for ln in late["lines"] if ln["key"] == "over05_1h")
+        self.assertEqual(pl["frac"], pe["frac"])  # ta sama empiria „gol po tej minucie”
+        self.assertLess(pl["chance"], pe["chance"] - 0.15)
+        self.assertLess(pl["chance"], 0.50)
+        late = g.apply_odds_to_match(late, {})
+        pl = next(ln for ln in late["lines"] if ln["key"] == "over05_1h")
+        self.assertLessEqual(pl["chance"], 0.80)
+        self.assertNotEqual(pl.get("worth"), "TAK")
+
+    def test_tempo_low_lowers_chance(self):
+        import goal_overs as g
+        tmp = g.tempo_from_live({"tot": (2, 1), "on": (0, 0), "cor": (0, 1), "da": (4, 3)}, minute=20, half=1)
+        self.assertEqual(tmp["label"], "niskie")
+        self.assertLess(tmp["mult"], 1.0)
+        ms = [self._game("h", True, [("home", 30)]) for _ in range(10)]
+        h = g.team_profile("h", ms, name="Alfa")
+        a = g.team_profile("a", ms, name="Beta")
+        meta = {"minutes": 20, "score": "0:0", "period": "1P", "mode": "live"}
+        base = g.apply_odds_to_match(g.live_match_card(h, a, meta), {"over05_1h": 1.60, "over05_1h_under": 2.30})
+        low = g.apply_odds_to_match(g.live_match_card(h, a, meta), {"over05_1h": 1.60, "over05_1h_under": 2.30},
+                                    tempo=tmp)
+        pb = next(ln for ln in base["lines"] if ln["key"] == "over05_1h")["chance"]
+        pl = next(ln for ln in low["lines"] if ln["key"] == "over05_1h")["chance"]
+        self.assertLess(pl, pb)
+        self.assertIn("Tempo meczu: niskie", " ".join(low.get("factors") or []))
+
+    def test_kupon_rejects_missing_odds_even_if_flagged_tak(self):
+        import app as appmod
+        bad = {"eventId": 3, "home": "A", "away": "B", "play": "Over 0.5 gola w 1. połowie",
+               "chance": 0.75, "chance_pct": 75, "odds": None, "verdict": "PLUS", "worth": "TAK",
+               "missing_odds": True, "mode": "live"}
+        self.assertFalse(appmod._kupon_is_tak(bad, "live"))
+
 
 class TFreshOvers(unittest.TestCase):
 

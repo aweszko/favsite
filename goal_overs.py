@@ -19,6 +19,22 @@ W_EMP, W_POIS = 0.55, 0.45
 MAX_PICKS = 10
 SIMILAR_MIN_N = 5  # minimum podobnych meczów zanim rozluźniamy warunki
 PRE_MIN_ODDS = 1.30  # przed meczem: nie typujemy bardzo krótkich kursów
+# Kotwica rynkowa i poprawki live (kalibracja: lastx gismo z 2026-10-29, 2278 połówek z p1).
+# Historia sama przy pokazie 80–90% trafiała wyraźnie rzadziej (ok. 67–73%).
+MARKET_WEIGHT = 0.55       # waga kursu bez marży; historia tylko koryguje
+NO_ODDS_CAP = 0.70         # bez kursu nie pokazuję wyższej szansy niż to i nie typuję TAK
+LATE_NEED1_MINUTE = 30     # od tej minuty w połowie: nie pokazuję >80% na 1 gol, chyba że kurs się zgadza
+LATE_NEED1_CAP = 0.80
+RECENT_N = 5
+RECENT_W = 2.0             # ost. 5 meczów waży 2× względem starszych
+COMP_SHRINK = 0.35         # waga ligowej/pucharowej bazy 1H wobec historii drużyn
+HALF_LEN = 45
+# Bazy P(gol w 1H) z tej samej próby lastx (nie zmyślane).
+BASE_1H_P = 0.71           # ligi mężczyzn / ogół, n≈1991
+BASE_1H_P_WOMEN = 0.81     # n=129
+BASE_1H_P_EURO = 0.71      # puchary UEFA, n=97 (w próbie nie niżej niż liga)
+BASE_1H_P_CUP = 0.77       # inne puchary, n=118
+BASE_1H_P_FRIENDLY = 0.60  # n=70
 # Mecze z HOJNJEGO okna (dziś+jutro), jeden typ na mecz.
 
 
@@ -177,7 +193,7 @@ def extract_goals(events):
     return out, prev
 
 
-def match_view(uid, is_home, goals, ft=None, p1=None, timeline_ok=True, mid=None, opp_uid=None, uts=None):
+def match_view(uid, is_home, goals, ft=None, p1=None, timeline_ok=True, mid=None, opp_uid=None, uts=None, tournament=None):
     """Jedno spojrzenie drużyny na mecz: gole strzelone/stracone z minutami."""
     my, opp = ("home", "away") if is_home else ("away", "home")
     scored = [g for g in goals if g["scored"] == my]
@@ -224,6 +240,7 @@ def match_view(uid, is_home, goals, ft=None, p1=None, timeline_ok=True, mid=None
         "trailing_ht": gf_ht < ga_ht, "leading_ht": gf_ht > ga_ht, "level_ht": gf_ht == ga_ht,
         "ht_00": ht_h == 0 and ht_a == 0,
         "ht_le1": (ht_h + ht_a) <= 1,  # 0:0, 1:0, 0:1
+        "tournament": tournament,
     }
 
 
@@ -414,23 +431,257 @@ def _frac_block(sample, need):
     return {"k": k, "n": n, "frac": frac(k, n)}
 
 
-def remaining_goals_dist(home, away, t, half, goals_so_far=0):
-    """Rozkład liczby goli w pozostałym czasie połowy: szanse na 1+, 2+ i 3+ (Laplace + Poisson)."""
+def is_women_comp(name):
+    s = " ".join(str(x) for x in ((name,) if not isinstance(name, (list, tuple)) else name) if x)
+    sl = s.lower()
+    if "(k)" in sl or " (w)" in sl or sl.endswith("(w)"):
+        return True
+    return any(w in sl for w in ("women", "woman", "ladies", "femen", "feminin", "damen", "kobiet", "kvinne", "dame "))
+
+
+def competition_kind(name):
+    s = (name or "").lower()
+    if any(k in s for k in ("uefa", "champions league", "europa league", "europa cup",
+                            "conference league", "liga mistrz", "liga europy",
+                            "superpuchar europy", "uecl")):
+        return "european_cup"
+    if any(k in s for k in ("world cup", "copa america", "nations league", "euro 20",
+                            "african cup", "afcon", "qualif")):
+        return "intl"
+    if any(k in s for k in ("friendly", "towarzysk", "international friend")):
+        return "friendly"
+    if any(k in s for k in ("puchar", "coupe ", "coppa", "league cup", "fa cup",
+                            "dfb-pokal", "dfb pokal", "copa ", "cup")):
+        return "cup"
+    return "league"
+
+
+def competition_base_p(meta, half=1):
+    """Bazowa szansa na co najmniej 1 gol w połowie, z kalibracji lastx (nie zmyślana)."""
+    if half != 1:
+        # 2H w tej próbie nie liczyłem osobno — zostawiam ogólną bazę ligową.
+        pass
+    meta = meta or {}
+    name = " ".join(str(meta.get(k) or "") for k in ("tournament", "category", "league"))
+    kind = competition_kind(name)
+    if is_women_comp(name) or is_women_comp(meta.get("home")) or is_women_comp(meta.get("away")):
+        p = BASE_1H_P_WOMEN
+        label = "piłka kobiet"
+    elif kind == "european_cup":
+        p = BASE_1H_P_EURO
+        label = "puchar europejski"
+    elif kind == "cup":
+        p = BASE_1H_P_CUP
+        label = "puchar"
+    elif kind == "friendly":
+        p = BASE_1H_P_FRIENDLY
+        label = "mecz towarzyski"
+    else:
+        p = BASE_1H_P
+        label = "liga"
+    return p, kind, label
+
+
+def remaining_minutes(t, half, phase=None):
+    try:
+        t = int(t)
+    except (TypeError, ValueError):
+        t = 0 if half == 1 else 45
+    if t < 0:
+        t = 0
+    if half == 1:
+        return max(0, HALF_LEN - min(t, HALF_LEN))
+    if phase == "ht" or t <= 45:
+        return HALF_LEN
+    return max(0, 90 - min(t, 90))
+
+
+def _recency_weights(matches, recent_n=RECENT_N, w=RECENT_W):
+    ms = [m for m in (matches or []) if m]
+    if any((m.get("uts") or 0) for m in ms):
+        ordered = sorted(ms, key=lambda m: m.get("uts") or 0, reverse=True)
+    else:
+        ordered = list(ms)
+    return {id(m): (w if i < recent_n else 1.0) for i, m in enumerate(ordered)}
+
+
+def _weighted_mean(pairs):
+    """pairs: (value, weight)."""
+    xs = [(v, w) for v, w in pairs if v is not None and w]
+    if not xs:
+        return None
+    return sum(v * w for v, w in xs) / sum(w for _, w in xs)
+
+
+def _team_bucket_lam(team, t, half):
+    n = team.get("n_tl") or 0
+    if n <= 0:
+        return None
+    if half == 1:
+        ranges = (("0-15", 0, 15), ("16-30", 15, 30), ("31-45+", 30, 45))
+        end = 45
+    else:
+        ranges = (("46-60", 45, 60), ("61-75", 60, 75), ("76-90+", 75, 90))
+        end = 90
+    counts = {}
+    for key in ("scored_buckets", "conceded_buckets"):
+        for b, c in (team.get(key) or {}).items():
+            counts[b] = counts.get(b, 0) + (c or 0)
+    try:
+        t = int(t)
+    except (TypeError, ValueError):
+        t = 45 if half == 2 else 0
+    lam = 0.0
+    any_b = False
+    for b, lo, hi in ranges:
+        width = hi - lo
+        if width <= 0:
+            continue
+        overlap = max(0, min(hi, end) - max(lo, t))
+        if overlap <= 0:
+            continue
+        any_b = True
+        lam += (counts.get(b, 0) / n) * (overlap / width)
+    return lam if any_b else None
+
+
+def remaining_rate_lambda(home, away, t, half, goals_so_far=0):
+    """Oczekiwane gole w pozostałym czasie połowy: tempo na minutę (kubełki albo λ połowy × udział minut)."""
+    rem = remaining_minutes(t, half)
+    field = "tot_1h" if half == 1 else "tot_2h"
+    lams_b = []
+    lams_u = []
+    for team in (home, away):
+        bl = _team_bucket_lam(team, t, half)
+        if bl is not None:
+            lams_b.append(bl)
+        wmap = _recency_weights(team.get("matches") or [])
+        pairs = []
+        for m in (team.get("matches") or []):
+            if not m or m.get(field) is None:
+                continue
+            pairs.append((float(m[field]), wmap.get(id(m), 1.0)))
+        full = _weighted_mean(pairs)
+        if full is not None:
+            lams_u.append(full * (rem / float(HALF_LEN)))
+    if lams_b:
+        return _mean(lams_b), rem
+    if lams_u:
+        return _mean(lams_u), rem
+    return None, rem
+
+
+def _comp_sample_lambda(home, away, half, meta):
+    """λ i P(1+) z historii obu drużyn w podobnym typie rozgrywek, gdy jest dość meczów."""
+    field = "tot_1h" if half == 1 else "tot_2h"
+    want = competition_kind(" ".join(str((meta or {}).get(k) or "") for k in ("tournament", "category", "league")))
+    rows = []
+    for team in (home, away):
+        for m in (team.get("matches") or []):
+            if not m or m.get(field) is None:
+                continue
+            k = competition_kind(m.get("tournament"))
+            if k != want:
+                continue
+            rows.append(float(m[field]))
+    if len(rows) < 6:
+        return None, None, len(rows)
+    lam = sum(rows) / len(rows)
+    p = sum(1 for x in rows if x >= 1) / len(rows)
+    return lam, p, len(rows)
+
+
+def remaining_goals_dist(home, away, t, half, goals_so_far=0, meta=None):
+    """Rozkład liczby goli w pozostałym czasie połowy: 1+/2+/3+.
+
+    Poisson z tempa na minutę (pozostały czas), empiria z podobnej minuty,
+    ost. 5 meczów ważone mocniej, lekka zbieżność do bazy ligi/pucharu.
+    """
     sample_h = _half_remaining_sample(home.get("matches") or [], t, half, goals_so_far)
     sample_a = _half_remaining_sample(away.get("matches") or [], t, half, goals_so_far)
+    # wagi recencji wg meczów w profilu, nie tylko w próbce
+    wh = _recency_weights(home.get("matches") or [])
+    wa = _recency_weights(away.get("matches") or [])
+    # próbka nie niesie id meczu — _half_remaining_sample zwraca tylko (hit, rem).
+    # Wagi przyłożymy równo w obrębie drużyny przez powtórne przejście poniżej.
     sample = sample_h + sample_a
     n = len(sample)
-    lam = _mean([rem for _, rem in sample]) if sample else None
+    lam_emp = _mean([rem for _, rem in sample]) if sample else None
+    lam_rate, rem = remaining_rate_lambda(home, away, t, half, goals_so_far)
+    lam = lam_rate if lam_rate is not None else lam_emp
+    base_p, kind, kind_label = competition_base_p(meta, half)
+    # próba tych samych drużyn w tym typie rozgrywek NIE zastępuje bazy z kalibracji
+    # (to byłoby błędne koło: 20/20 w lidze ustawia bazę na 100% i podbija szansę).
+    _, _, comp_n = _comp_sample_lambda(home, away, half, meta)
+    # baza na pozostały czas: stałe tempo, λ_baza × rem/45
+    try:
+        lam_base_full = -math.log(max(1e-6, 1.0 - float(base_p)))
+    except (TypeError, ValueError):
+        lam_base_full = None
+    lam_base_rem = None if lam_base_full is None else lam_base_full * (rem / float(HALF_LEN))
+    # empiria ważona: para mecz ↔ waga recencji
+    def weighted_emp_paired(need):
+        ks = ns = 0.0
+        k_raw = n_raw = 0
+        for team in (home, away):
+            wmap = _recency_weights(team.get("matches") or [])
+            for m in (team.get("matches") or []):
+                sm = _half_remaining_sample([m], t, half, goals_so_far)
+                if not sm:
+                    continue
+                rem_g = sm[0][1]
+                hit = rem_g >= need
+                w = wmap.get(id(m), 1.0)
+                ks += w if hit else 0.0
+                ns += w
+                k_raw += int(hit)
+                n_raw += 1
+        return ks, ns, k_raw, n_raw
+
     by_need = {}
     for need in (1, 2, 3):
-        k = sum(1 for _, rem in sample if rem >= need)
-        ch = chance_block(k, n, lam, need - 0.5)
+        k_w, n_w, k, n_need = weighted_emp_paired(need)
+        ch = chance_block(k, n_need, lam, need - 0.5)
+        # tempo na minutę jest trzonem; częstość „gol po tej minucie w X/N” tylko lekko koryguje,
+        # i tym mniej, im mniej minut zostało (inaczej późny gol w historii trzyma 80%+ do 44.')
+        p_emp_w = laplace(k_w, n_w) if n_w and n_w > 0 else ch.get("p_emp")
+        p_pois = pois_over(need - 0.5, lam) if lam is not None else ch.get("p_pois")
+        if need == 1:
+            # tempo na minutę jest trzonem przy 1 golu; empiria słabnie, gdy zostaje mało minut
+            share_emp = 0.35 * (float(rem) / float(HALF_LEN)) if rem is not None else 0.35
+            share_emp = max(0.0, min(0.45, share_emp))
+        else:
+            # 2+/3+: ogon Poissona jest mniej pewny — zostawiam klasyczną mieszankę
+            share_emp = W_EMP
+        if p_emp_w is not None and p_pois is not None:
+            p_hist = share_emp * p_emp_w + (1.0 - share_emp) * p_pois
+        else:
+            p_hist = combine(p_emp_w, p_pois)
+        p_base_need = pois_over(need - 0.5, lam_base_rem) if lam_base_rem is not None else None
+        # baza z kalibracji dotyczy gola w 1. połowie; w 2H nie ściągam do niej
+        if half == 1 and p_hist is not None and p_base_need is not None:
+            p = (1.0 - COMP_SHRINK) * p_hist + COMP_SHRINK * p_base_need
+        else:
+            p = p_hist
+        ch = dict(ch)
+        ch["p_emp"] = p_emp_w
+        ch["p_pois"] = p_pois
+        ch["p_hist"] = p_hist
+        ch["p_base"] = p_base_need
+        ch["p"] = p
+        ch["pct"] = pct(p)
+        ch["k_w"] = None if not n_w else round(k_w, 2)
+        ch["n_w"] = None if not n_w else round(n_w, 2)
         ch["home"] = _frac_block(sample_h, need)
         ch["away"] = _frac_block(sample_a, need)
         by_need[need] = ch
     return {
         "n": n, "lam": None if lam is None else round(lam, 3),
+        "lam_rate": None if lam_rate is None else round(lam_rate, 3),
         "half": half, "t": t, "goals_so_far": int(goals_so_far),
+        "remaining_minutes": rem,
+        "comp_kind": kind, "comp_label": kind_label,
+        "comp_base_p": base_p, "comp_n": comp_n,
         "by_need": by_need,
     }
 
@@ -1312,6 +1563,7 @@ def make_live_lines(dist, st):
                 "frac": ch["frac"], "k": ch["k"], "n": ch["n"],
                 "p_emp": ch["p_emp"], "p_pois": ch["p_pois"], "p_raw": ch["p_raw"],
                 "lam": ch.get("lam"), "why": why,
+                "chance_hist": ch.get("p_hist", ch["p"]),
                 "odds": None, "implied": None, "implied_pct": None,
                 "edge": None, "edge_pp": None, "verdict": None,
             })
@@ -1411,16 +1663,226 @@ def live_recommend(card):
     return offer_text(best, why=why)
 
 
-def apply_odds_to_match(card, odds_map=None):
+
+def tempo_from_live(stats, minute=None, half=1):
+    """Tempo z bieżących strzałów, celnych, rożnych i groźnych ataków. Brak danych = bez zmiany."""
+    stats = stats or {}
+    def tot_pair(v):
+        if not v:
+            return None
+        if isinstance(v, (list, tuple)) and len(v) >= 2 and v[0] is not None and v[1] is not None:
+            try:
+                return int(v[0]) + int(v[1])
+            except (TypeError, ValueError):
+                return None
+        return None
+    shots = tot_pair(stats.get("tot") or stats.get("shots"))
+    sot = tot_pair(stats.get("on"))
+    cor = tot_pair(stats.get("cor"))
+    da = tot_pair(stats.get("da"))
+    try:
+        m = int(str(minute).split("+")[0])
+    except (TypeError, ValueError):
+        m = None
+    # za wcześnie, żeby karać brak wydarzeń
+    if m is None or m < 8:
+        if all(x is None or x == 0 for x in (shots, sot, cor, da)):
+            return {"mult": 1.0, "label": None, "note": None, "early": True}
+    # oczekiwane łącznie (obie bramki) na 45 min, ostrożne progi
+    scale = 1.0
+    if m and m > 0:
+        scale = min(1.0, max(0.2, float(m) / float(HALF_LEN if half == 1 else max(m, 1))))
+    # niskie: mało wszystkiego względem czasu
+    low = False
+    high = False
+    bits = []
+    if m and m >= 12:
+        if shots is not None:
+            bits.append("%d strzałów" % shots)
+        if sot is not None:
+            bits.append("%d celnych" % sot)
+        if cor is not None:
+            bits.append("%d rożnych" % cor)
+        # po 15+ min 1H: niskie gdy strzały <= 3 i celne <= 1 i rożne <= 1
+        if shots is not None:
+            exp_shots = 8.0 * (m / 45.0)   # typowe ~8 strzałów łącznie do przerwy (orientacyjnie)
+            if (shots <= max(3, 0.65 * exp_shots)
+                    and (sot is None or sot <= 1)
+                    and (cor is None or cor <= 2)):
+                low = True
+            if shots >= max(10, 1.6 * exp_shots) or (sot is not None and sot >= 6) or (da is not None and da >= 40 and m <= 30):
+                high = True
+        elif da is not None and m >= 15:
+            if da <= 8:
+                low = True
+            elif da >= 40:
+                high = True
+    if low and not high:
+        return {"mult": 0.75, "label": "niskie", "note": ", ".join(bits) or None, "early": False}
+    if high and not low:
+        return {"mult": 1.12, "label": "wysokie", "note": ", ".join(bits) or None, "early": False}
+    if shots is None and sot is None and cor is None and da is None:
+        return {"mult": 1.0, "label": None, "note": None, "early": False}
+    return {"mult": 1.0, "label": "umiarkowane", "note": ", ".join(bits) or None, "early": False}
+
+
+def _apply_tempo_to_p(p, need, lam, mult):
+    if p is None or mult is None or abs(mult - 1.0) < 1e-9:
+        return p
+    if need == 1:
+        # p = 1-e^{-λ} → przelicz λ, przeskaluj tempo
+        try:
+            lam_p = -math.log(max(1e-9, 1.0 - min(0.999, float(p))))
+        except (ValueError, TypeError):
+            lam_p = lam
+        if lam_p is None:
+            return p
+        return max(0.0, min(0.99, 1.0 - math.exp(-max(0.0, lam_p) * float(mult))))
+    if lam is not None:
+        return pois_over(need - 0.5, max(0.0, float(lam) * float(mult)))
+    return p
+
+
+def factor_lines(card, tempo=None):
+    """Proste zdania do szczegółów: tempo, kurs, typ rozgrywek, forma, czas."""
+    out = []
+    det_src = (card.get("dist_meta") or {})
+    if not det_src and card.get("half"):
+        det_src = {"comp_label": None}
+    kind_label = None
+    dist = card.get("dist") or {}
+    # meta stored on card
+    kind_label = card.get("comp_label")
+    if kind_label:
+        base_pct = card.get("comp_base_pct")
+        half = card.get("half") or 1
+        if base_pct is not None and half == 1:
+            out.append("Typ rozgrywek: %s (w takich meczach gol w 1. połowie padał w ok. %d%% spotkań z zebranej historii)." % (kind_label, int(base_pct)))
+        else:
+            out.append("Typ rozgrywek: %s." % kind_label)
+    out.append("Ostatnie 5 meczów każdej drużyny waży więcej niż starsze.")
+    rem = card.get("remaining_minutes")
+    tref = card.get("minutes") if card.get("minutes") is not None else card.get("t_ref")
+    if rem is not None and card.get("phase") in ("1h", "2h", "ht"):
+        out.append("Minuty bez kolejnego gola obniżają szansę — zostało ok. %d min tej połowy." % int(rem))
+    tempo = tempo or card.get("tempo") or {}
+    if tempo.get("label"):
+        extra = (" (%s)" % tempo["note"]) if tempo.get("note") else ""
+        out.append("Tempo meczu: %s%s." % (tempo["label"], extra))
+    # market from primary / best line
+    best = _primary_line(card.get("lines") or []) or card
+    if best and best.get("implied_pct") is not None:
+        out.append("Kurs bukmachera sugeruje %d%%." % int(best["implied_pct"]))
+    elif best and not best.get("odds"):
+        out.append("Brak kursu Superbet — nie typuję TAK, szansę z samej historii ograniczam.")
+    if best and best.get("chance_hist") is not None and best.get("chance") is not None:
+        hp = pct(best["chance_hist"])
+        cp = best.get("chance_pct")
+        if hp is not None and cp is not None and int(hp) != int(cp):
+            out.append("Z samej historii wyszło ok. %d%%, po poprawkach (kurs, tempo, typ rozgrywek) pokazuję %d%%." % (int(hp), int(cp)))
+    if best and best.get("chance_capped"):
+        out.append("Szansa została ograniczona — bez zgody kursu nie pokazuję tak wysokiej wartości.")
+    return out
+
+
+def finalize_live_chance(card, tempo=None):
+    """Kotwica rynkowa (≥50%), tempo live, limit bez kursu i limit późnej minuty na 1 gol."""
+    if not card:
+        return card
+    tempo = tempo or card.get("tempo")
+    if tempo:
+        card["tempo"] = tempo
+    phase = card.get("phase")
+    try:
+        minute = card.get("minutes")
+        minute = int(str(minute).split("+")[0]) if minute is not None and minute != "" else None
+    except (TypeError, ValueError):
+        minute = None
+    if card.get("phase") == "ht":
+        t_for_late = 45 if (card.get("half") == 1) else 45
+        # 2H at HT is start of half — not late
+        late = False if card.get("half") == 2 else True
+    else:
+        half = card.get("half") or 1
+        start = 0 if half == 1 else 45
+        late = minute is not None and (minute - start) >= LATE_NEED1_MINUTE
+    lines = []
+    for ln in (card.get("lines") or []):
+        ln = dict(ln)
+        p0 = ln.get("chance_hist")
+        if p0 is None:
+            p0 = ln.get("chance")
+            ln["chance_hist"] = p0
+        p = p0
+        need = ln.get("need") or 1
+        lam = ln.get("lam")
+        if tempo and tempo.get("mult") and p is not None:
+            p = _apply_tempo_to_p(p, need, lam, tempo["mult"])
+        implied = ln.get("implied")
+        if implied is not None and p is not None:
+            w = MARKET_WEIGHT if need == 1 else 0.35
+            p = w * float(implied) + (1.0 - w) * float(p)
+        capped = False
+        missing = not ln.get("odds") or float(ln.get("odds") or 0) <= 1
+        if missing and p is not None and p > NO_ODDS_CAP + 1e-12:
+            p = NO_ODDS_CAP
+            capped = True
+        # nie pokazuj >80% na jednego gola późno w połowie, chyba że kurs też jest krótki
+        if (need == 1 and late and p is not None and p > LATE_NEED1_CAP + 1e-12):
+            agrees = implied is not None and float(implied) >= (LATE_NEED1_CAP - 0.02)
+            if not agrees:
+                p = LATE_NEED1_CAP
+                capped = True
+        ln["chance"] = None if p is None else max(0.0, min(0.99, float(p)))
+        ln["chance_pct"] = pct(ln["chance"])
+        ln["chance_capped"] = capped
+        ln["missing_odds"] = bool(missing)
+        # przelicz TAK/NIE od nowej szansy (apply_odds zostawia szansę z historii)
+        if missing:
+            ln["edge"] = ln["edge_pp"] = ln["verdict"] = None
+            ln["unreliable"] = False
+            ln["implied"] = ln.get("implied")
+        elif implied is not None and ln["chance"] is not None:
+            edge = ln["chance"] - float(implied)
+            ln["edge"] = round(edge, 4)
+            ln["edge_pp"] = int(round(100 * edge))
+            if edge > SANITY_EDGE + 1e-12:
+                ln["verdict"] = "UNRELIABLE"
+                ln["unreliable"] = True
+            else:
+                ln["unreliable"] = False
+                ln["verdict"] = "PLUS" if edge >= EDGE_PLUS - 1e-12 else "MINUS"
+        fill_offer(ln)
+        if missing:
+            ln["worth"] = None  # nigdy TAK bez kursu
+            if capped:
+                wt = ln.get("worth_text") or ""
+                if "ograniczam" not in wt:
+                    ln["worth_text"] = (wt + " Szansę z samej historii ograniczam — bez kursu nie typuję.").strip()
+        lines.append(ln)
+    card["lines"] = lines
+    factors = factor_lines(card, tempo)
+    card["factors"] = factors
+    if card.get("detail") is not None:
+        det = dict(card["detail"])
+        det["factors"] = factors
+        card["detail"] = det
+    return card
+
+
+def apply_odds_to_match(card, odds_map=None, tempo=None):
     if not card:
         return card
     out = dict(card)
     out["lines"] = [apply_odds_to_line(ln, odds_map) for ln in (card.get("lines") or [])]
+    if out.get("mode") == "live" or out.get("phase") in ("1h", "2h", "ht"):
+        finalize_live_chance(out, tempo=tempo)
     out["recommend"] = live_recommend(out)
     best = _best_offer_line(out)
     for k in ("play", "key", "chance", "chance_pct", "frac", "k", "n",
               "odds", "implied", "implied_pct", "edge", "edge_pp", "verdict",
-              "chance_label", "worth", "worth_because", "worth_text", "line", "scope", "why"):
+              "chance_label", "worth", "worth_because", "worth_text", "line", "scope", "why",
+              "chance_hist", "chance_capped", "missing_odds"):
         if best.get(k) is not None:
             out[k] = best.get(k)
     if out.get("detail") is not None:
@@ -1997,6 +2459,7 @@ def build_live_detail(card, dist, home, away, st):
         "buckets": buckets_txt,
         "recommend": card.get("recommend"),
         "scoring_raw": sc,
+        "factors": card.get("factors") or [],
     }
 
 
@@ -2018,7 +2481,7 @@ def live_match_card(home, away, meta=None):
         return None
     if goals_so_far is None:
         return None
-    dist = remaining_goals_dist(home, away, st["t_ref"], half, goals_so_far)
+    dist = remaining_goals_dist(home, away, st["t_ref"], half, goals_so_far, meta=meta)
     if not (dist.get("n") or 0):
         return None
     lines = make_live_lines(dist, st)
@@ -2045,6 +2508,12 @@ def live_match_card(home, away, meta=None):
     card["tot"] = st.get("tot")
     card["goals_1h"] = st.get("goals_1h")
     card["goals_2h"] = st.get("goals_2h")
+    card["comp_kind"] = dist.get("comp_kind")
+    card["comp_label"] = dist.get("comp_label")
+    card["comp_base_p"] = dist.get("comp_base_p")
+    card["comp_base_pct"] = pct(dist.get("comp_base_p"))
+    card["remaining_minutes"] = dist.get("remaining_minutes")
+    card["chance_hist"] = (used or {}).get("p_hist", (used or {}).get("p"))
     # Informacyjnie: czy 1+ w połowie spełnia dawny próg. Nie ukrywamy meczu.
     card["qualified"] = bool(
         (used.get("n") or 0) >= MIN_N and used.get("p") is not None and used["p"] >= P_MIN
@@ -2302,7 +2771,9 @@ _PUBLIC_KEYS = ("rank", "eventId", "start_warsaw", "day_warsaw", "ts", "home", "
             "need", "scope", "implied", "implied_pct", "edge", "edge_pp", "verdict",
             "unreliable", "odds_under", "current",
             "state_ts", "state_warsaw", "state_age_seconds", "state_label", "pending",
-            "half", "goals_so_far", "tot", "goals_1h", "goals_2h", "recommend")
+            "half", "goals_so_far", "tot", "goals_1h", "goals_2h", "recommend",
+            "factors", "tempo", "comp_label", "comp_kind", "comp_base_pct",
+            "remaining_minutes", "chance_hist", "chance_capped", "missing_odds")
 
 
 def _round_pub(out):
@@ -2353,12 +2824,17 @@ def public_card(c):
 
 
 CHANCE_RULE = (
-    "Biorę ostatnie mecze obu drużyn i liczę, jak często padał gol w podobnej sytuacji "
-    "(ten sam wynik połowy, podobna liczba goli, podobna minuta). "
-    "Szansa na wygraną zakładu to ta częstość, lekko poprawiona prostym rachunkiem, ile goli zwykle pada w takim czasie. "
-    "Gdy jest kurs Superbet, porównuję szansę z tym, co sugeruje kurs. "
-    "Opłaca się, gdy nasza szansa jest wyraźnie wyższa (o co najmniej 3 na 100). "
+    "Na żywo liczę szansę na gole w pozostałym czasie tej połowy: ile goli zwykle padało na minutę "
+    "w ostatnich meczach obu drużyn (ost. 5 waży więcej), a nie samo „gol w 1. połowie w X z N meczów”. "
+    "Gdy jest kurs Superbet na tę linię, biorę szansę z kursu (bez marży bukmachera) jako kotwicę — co najmniej połowę wagi — "
+    "a historia tylko delikatnie koryguje. "
+    "Dokładam typ rozgrywek (np. puchar europejski albo liga), a gdy mecz trwa: tempo z strzałów, celnych, rożnych i groźnych ataków. "
+    "Im dłużej nie ma gola, tym szansa spada, bo zostaje mniej minut. "
+    "Bez kursu nie typuję TAK i nie pokazuję bardzo wysokiej szansy z samej historii. "
+    "Późno w połowie nie pokazuję powyżej 80% na jednego gola, chyba że kurs też tak mówi. "
+    "Opłaca się, gdy nasza szansa jest wyraźnie wyższa od kursu (o co najmniej 3 na 100). "
+    "Gdy szansa mocno mija się z kursem, oznaczam typ jako niepewne dane. "
     "Przed meczem typuję tylko gole w 1. połowie (over 0.5, 1.5 i 2.5) i tylko przy kursie ok. 1,30 albo wyższym. "
-    "Mało meczów? Piszę to wprost i i tak pokazuję mecz. To częstość z historii, nie pewność że tak będzie."
+    "To nie jest pewność, że tak będzie, i nic nie jest stawiane."
 )
 

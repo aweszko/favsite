@@ -518,10 +518,11 @@ function oversLiveDetail(m){
  const rec=safeText(d.recommend||m.recommend||'');
  const stan=safeText(m.state_label)||(m.state_warsaw?('stan z '+m.state_warsaw):'');
  const facts=[d.similar,d.given_1h,d.given_1h_now].filter(Boolean).map(s=>'<div class="oc-fact">'+esc(safeText(s))+'</div>').join('');
+ const fac=(d.factors||m.factors||[]).map(s=>'<div class="oc-fact">'+esc(safeText(s))+'</div>').join('');
  const skipRec=rec && (m.lines||[]).length && /Co zagrać|Szansa na wygraną/.test(rec);
  return '<div class="oc-detail">'
   +linesTable(m)
-  +facts+cond
+  +fac+facts+cond
   +(d.next_goal?'<div class="oc-fact">'+esc(safeText(d.next_goal))+'</div>':'')
   +(d.scoring?'<div class="oc-fact">'+esc(safeText(d.scoring))+'</div>':'')
   +(d.buckets?'<div class="oc-fact">'+esc(safeText(d.buckets))+'</div>':'')

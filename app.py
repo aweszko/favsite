@@ -576,7 +576,7 @@ def live_details(br):
             val = (v.get(k) or {}).get("value") or {}
             h, a = to_int(val.get("home")), to_int(val.get("away"))
             return None if h is None or a is None else (h, a)
-        return {"on": pair("125"), "cor": pair("124"), "da": pair("1029")}
+        return {"on": pair("125"), "tot": pair("goalattempts"), "cor": pair("124"), "da": pair("1029")}
     return cached("live:%s" % br, 60, f)
 
 def vip(rank_res):
@@ -1611,6 +1611,7 @@ def team_goal_views(uid, exclude_br=None, history=None):
         d = lastx_raw(uid)
         if not d:
             return None
+        tours = d.get("tournaments") or {}
         ms = []
         for x in _done(d)[:n_hist]:
             mid = x.get("_id")
@@ -1629,11 +1630,13 @@ def team_goal_views(uid, exclude_br=None, history=None):
                 tl_ok = True
                 if ft and goals and (ft[0] + ft[1]) != len(goals):
                     tl_ok = False
+            tname = (tours.get(str(x.get("_tid"))) or {}).get("name")
             mv = goal_overs.match_view(
                 uid, is_home, goals if tl_ok else [], ft=ft or ft_g, p1=p1,
                 timeline_ok=tl_ok, mid=mid,
                 opp_uid=(ta if is_home else th).get("uid"),
-                uts=(x.get("time") or {}).get("uts"))
+                uts=(x.get("time") or {}).get("uts"),
+                tournament=tname)
             if not tl_ok and p1 and ft:
                 mv["gf_ht"] = p1[0] if is_home else p1[1]
                 mv["ga_ht"] = p1[1] if is_home else p1[0]
@@ -2317,7 +2320,28 @@ def _pending_live_card(ev, fetched_at, sport_pl=None, sport=None):
     return card
 
 
+def _live_tempo_for(cards):
+    """Bieżące strzały/rożne/ataki z gismo (cache 60 s). Lekko, tylko karty z historią."""
+    got = {}
+    need = [c for c in (cards or []) if c and c.get("br") and c.get("eventId")]
+    if not need:
+        return got
+    def one(c):
+        try:
+            st = live_details(c.get("br"))
+        except Exception:
+            st = None
+        tempo = goal_overs.tempo_from_live(st, minute=c.get("minutes"), half=c.get("half") or 1)
+        return c.get("eventId"), tempo
+    with ThreadPoolExecutor(min(4, max(1, len(need)))) as ex:
+        for eid, tempo in ex.map(one, need):
+            if eid:
+                got[eid] = tempo
+    return got
+
+
 def _publish_live_overs(evs, partial=False, fetch_odds=False, fetched_at=None):
+
     fetched_at = fetched_at if fetched_at is not None else cache_fetched_at("list:live-foot")
     age = (time.time() - fetched_at) if fetched_at else None
     stale_feed = bool(fetched_at is None or (age is not None and age > LIVE_STATE_MAX_AGE))
@@ -2348,9 +2372,15 @@ def _publish_live_overs(evs, partial=False, fetch_odds=False, fetched_at=None):
             pending = _pending_live_card(ev, fetched_at, sport_pl="Piłka")
             if pending:
                 cards.append(pending)
-    odds_map = _live_odds_for([c.get("eventId") for c in cards], fetch=fetch_odds)
+    ready_ids = [c.get("eventId") for c in cards if c and not c.get("pending") and c.get("eventId")]
+    odds_map = _live_odds_for(ready_ids, fetch=fetch_odds)
+    tempo_map = _live_tempo_for([c for c in cards if c and not c.get("pending")])
     for i, card in enumerate(cards):
-        cards[i] = goal_overs.apply_odds_to_match(card, odds_map.get(card.get("eventId")) or {})
+        if not card or card.get("pending"):
+            continue
+        cards[i] = goal_overs.apply_odds_to_match(
+            card, odds_map.get(card.get("eventId")) or {},
+            tempo=tempo_map.get(card.get("eventId")))
         stamp_card(cards[i], fetched_at, live=True)
     # karty z historią na górze, potem mecze live z Superbet jeszcze bez typów
     ready = [c for c in cards if c and not c.get("pending")]
@@ -2421,7 +2451,7 @@ def build_overs_live(progress=None, job=None):
                 progress["done"] = progress.get("done", 0) + 1
                 if job is not None:
                     job["beat"] = time.time()
-        _publish_live_overs(evs, partial=True, fetch_odds=False)
+        _publish_live_overs(evs, partial=True, fetch_odds=True)
 
     if need:
         with ThreadPoolExecutor(OVERS_WORKERS) as pool:
@@ -2456,7 +2486,7 @@ def get_overs_live():
                and (LIVE_FAIL_UNTIL.get(e.get("eventId")) or 0) < time.time()]
     # kursy dociągamy, gdy historia już jest — cache ~30–55 s, bez dodatkowego liczenia timeline
     res = _publish_live_overs(evs, partial=bool(LIVE_OVERS_STATE.get("job") or missing),
-                             fetch_odds=not missing, fetched_at=fetched_at)
+                             fetch_odds=True, fetched_at=fetched_at)
     with LOCK:
         job = LIVE_OVERS_STATE.get("job")
         if missing and job is None:
@@ -2975,6 +3005,8 @@ def _kupon_is_tak(p, source="pre"):
     if not p or p.get("pending"):
         return False
     if p.get("unreliable") or p.get("verdict") == "UNRELIABLE" or p.get("worth") == "niepewne dane":
+        return False
+    if p.get("missing_odds") or not p.get("odds"):
         return False
     if p.get("verdict") != "PLUS" and p.get("worth") != "TAK":
         return False
