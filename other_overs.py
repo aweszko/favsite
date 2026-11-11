@@ -33,8 +33,12 @@ CHANCE_RULE = (
     "przekraczał daną linię (np. liczba gemów, setów, punktów albo goli). "
     "Szansa na wygraną zakładu to ta częstość, lekko poprawiona prostym rachunkiem "
     "(dokładam po jednym „tak” i jednym „nie”, żeby przy małej liczbie meczów nie przesadzać). "
-    "Gdy mecz już trwa, biorę tylko te dawne mecze, które dochodziły przynajmniej do obecnego wyniku. "
+    "Gdy mecz już trwa, nie patrzę na cały dawny wynik. Liczę, ile jeszcze zwykle padało "
+    "w pozostałym czasie: w tej kwarcie albo tercji (według minut, które zostają) "
+    "i w następnych częściach gry, albo w tym i kolejnych setach. "
     "Typuję tylko linie z kursem Superbet ok. 1,30 albo wyższym. "
+    "Gdy nasza szansa wychodzi dużo wyżej (o więcej niż 15 na 100) niż to, co sugeruje kurs, "
+    "nie typuję — piszę „niepewne dane”. "
     "Jak którejś strony brakuje historii (mniej niż 8 meczów), w ogóle nie pokazuję tego spotkania. "
     "To częstość z historii, nie pewność że tak będzie."
 )
@@ -113,6 +117,10 @@ def parse_lastx(data, sport):
             rec["h2"] = None
             if 3 in rec["quarters"] and 4 in rec["quarters"]:
                 rec["h2"] = rec["quarters"][3] + rec["quarters"][4]
+            qsum = sum(rec["quarters"].values()) if rec["quarters"] else None
+            rec["ot_points"] = None
+            if rec["points"] is not None and qsum is not None and rec["points"] > qsum:
+                rec["ot_points"] = rec["points"] - qsum
         elif sport == "hockey":
             rec["goals_final"] = (res[0] + res[1]) if res else None
             if any(i in parts for i in (1, 2, 3)):
@@ -120,6 +128,9 @@ def parse_lastx(data, sport):
             else:
                 rec["goals_reg"] = rec["goals_final"]
             rec["periods"] = {i: a + b for i, (a, b) in parts.items() if i <= 3}
+            rec["ot_goals"] = None
+            if rec["goals_final"] is not None and rec["goals_reg"] is not None and rec["goals_final"] > rec["goals_reg"]:
+                rec["ot_goals"] = rec["goals_final"] - rec["goals_reg"]
         else:
             continue
         out.append(rec)
@@ -280,6 +291,93 @@ def current_state(ev):
                 st["goals_reg"] = tot
                 if st["goals_final"] is None:
                     st["goals_final"] = tot
+    attach_clock(st, ev, sport)
+    return st
+
+
+def parse_mmss(s):
+    """'5:03' albo '7:52' -> sekundy. Nic nie zgadujemy."""
+    if s is None or s is False or s == "":
+        return None
+    s = str(s).strip()
+    if not s:
+        return None
+    try:
+        if ":" in s:
+            parts = s.split(":")
+            if len(parts) == 2:
+                return int(parts[0]) * 60 + int(float(parts[1]))
+            if len(parts) == 3:
+                return int(parts[0]) * 3600 + int(parts[1]) * 60 + int(float(parts[2]))
+        return int(float(s))
+    except (TypeError, ValueError):
+        return None
+
+
+def period_num_from_label(period, sport, rows=None):
+    """Numer bieżącej kwarty/tercji/seta i czy to przerwa (część gry właśnie się skończyła)."""
+    p = str(period or "").strip().upper().replace(" ", "")
+    if p in ("HT", "PRZERWA", "BREAK", "INT", "PAUSE") or "PRZERW" in p:
+        if sport == "basketball":
+            return 2, True
+        return None, True
+    m = re.match(r"^(\d+)([A-Z]*)$", p)
+    if m:
+        n = int(m.group(1))
+        suf = m.group(2)
+        # 2B / 1B: po tercji, przerwa (nie liczę już goli w skończonej części)
+        if suf == "B":
+            return n, True
+        return n, False
+    if rows:
+        nums = [r["num"] for r in rows if r.get("num")]
+        if nums:
+            return max(nums), False
+    return None, False
+
+
+def period_seconds(sport, rem_sec):
+    if sport == "hockey":
+        return 20 * 60
+    if sport == "basketball":
+        base = 10 * 60
+        if rem_sec is not None and rem_sec > 10 * 60:
+            base = 12 * 60
+        if rem_sec is not None and rem_sec > 12 * 60:
+            base = 20 * 60
+        return base
+    return None
+
+
+def attach_clock(st, ev, sport):
+    rem = parse_mmss(st.get("remaining") or (ev or {}).get("remainingPeriodTime") or (ev or {}).get("remaining"))
+    period = st.get("period") or (ev or {}).get("period") or (ev or {}).get("periodStatus")
+    rows = _period_rows((ev or {}).get("periods"))
+    pnum, inter = period_num_from_label(period, sport, rows)
+    if pnum is None:
+        if sport == "basketball" and st.get("quarters"):
+            pnum = max(st["quarters"])
+        elif sport == "hockey" and st.get("periods"):
+            pnum = max(st["periods"])
+        elif sport == "volleyball" and st.get("set_points"):
+            pnum = max(st["set_points"])
+        elif sport == "tennis" and st.get("set_games"):
+            pnum = max(st["set_games"])
+    period_sec = period_seconds(sport, rem)
+    rem_frac = None
+    if inter:
+        rem_frac = 0.0
+        rem = 0
+    elif rem is not None and period_sec:
+        rem_frac = max(0.0, min(1.0, rem / float(period_sec)))
+    st["clock"] = {
+        "period_num": pnum,
+        "intermission": inter,
+        "rem_sec": rem,
+        "period_sec": period_sec,
+        "rem_frac": rem_frac,
+        "time_unknown": (not inter) and rem_frac is None and sport in ("basketball", "hockey"),
+    }
     return st
 
 
@@ -332,6 +430,11 @@ def is_over_outcome(name):
     return n.startswith("powyżej") or n.startswith("above") or n.startswith("over")
 
 
+def is_under_outcome(name):
+    n = (name or "").strip().lower()
+    return n.startswith("poniżej") or n.startswith("below") or n.startswith("under")
+
+
 def market_key(market_name, sport):
     """Zwraca (key, field, part, play_unit) albo None gdy to nie jest zwykły over."""
     m = _norm_mkt(market_name)
@@ -382,20 +485,22 @@ def market_key(market_name, sport):
 
 
 def parse_other_odds(odds, sport):
-    """Mapa klucz_linii -> kurs, tylko aktywne 'powyżej X.5' na zwykłych rynkach."""
+    """Mapa klucz_linii -> kurs over (i under, gdy jest), tylko zwykłe rynki."""
     got = {}
+    unders = {}
     for o in odds or []:
         if not isinstance(o, dict):
             continue
-        st = (o.get("status") or "active").lower()
-        if st in ("block", "blocked", "suspended", "inactive"):
+        stt = (o.get("status") or "active").lower()
+        if stt in ("block", "blocked", "suspended", "inactive"):
             continue
         mk = market_key(o.get("marketName") or "", sport)
         if not mk:
             continue
         base, _field, _part, unit = mk
         on = o.get("name") or ""
-        if not is_over_outcome(on):
+        over, under = is_over_outcome(on), is_under_outcome(on)
+        if not over and not under:
             continue
         line = _line_from_name(on)
         if line is None:
@@ -407,6 +512,11 @@ def parse_other_odds(odds, sport):
         if price <= 1:
             continue
         key = "%s_%.1f" % (base, line)
+        if under:
+            prev_u = unders.get(key)
+            if prev_u is None or price < prev_u:
+                unders[key] = price
+            continue
         prev = got.get(key)
         if prev is None or price < prev["odds"]:
             got[key] = {
@@ -414,6 +524,9 @@ def parse_other_odds(odds, sport):
                 "line": line, "odds": price, "unit": unit,
                 "play": "Over %s %s" % (("%g" % line).replace(".", ","), unit),
             }
+    for key, rec in got.items():
+        if key in unders:
+            rec["odds_under"] = unders[key]
     return got
 
 
@@ -431,9 +544,155 @@ def _current_for(st, field, part):
     return st.get(field)
 
 
-def _unit_word(unit, k):
-    # prosty polski w „dlaczego”
-    return unit
+def remaining_clock(m, sport, field, part, st):
+    """Ile jeszcze punktów/goli z tego historycznego meczu w pozostałym czasie (tempo z tej części gry)."""
+    clock = st.get("clock") or {}
+    pnum = clock.get("period_num")
+    rem_frac = clock.get("rem_frac")
+    if sport == "basketball":
+        parts = m.get("quarters") or {}
+        ot = m.get("ot_points") or 0
+        last_reg = 4
+    else:
+        parts = m.get("periods") or {}
+        ot = m.get("ot_goals") or 0
+        last_reg = 3
+    if not parts:
+        return None
+    if field in ("quarters", "periods") and part:
+        if pnum is None:
+            return None
+        if pnum > part:
+            return 0.0
+        if pnum < part:
+            return float(parts.get(part) or 0)
+        if rem_frac is None:
+            return None
+        return rem_frac * float(parts.get(part) or 0)
+    if field == "h2":
+        if pnum is None:
+            return None
+        if pnum <= 2:
+            return float(parts.get(3) or 0) + float(parts.get(4) or 0)
+        if pnum == 3:
+            f = 0.0 if rem_frac is None else rem_frac
+            return f * float(parts.get(3) or 0) + float(parts.get(4) or 0)
+        if rem_frac is None:
+            return None
+        return rem_frac * float(parts.get(4) or 0)
+    if pnum is None:
+        return None
+    f = 0.0 if rem_frac is None else rem_frac
+    rem = f * float(parts.get(pnum) or 0)
+    for j in range(pnum + 1, last_reg + 1):
+        rem += float(parts.get(j) or 0)
+    if field == "goals_final" or (sport == "basketball" and field == "points"):
+        rem += float(ot or 0)
+    return rem
+
+
+def remaining_sets(m, sport, field, part, st):
+    """Ile jeszcze gemów/punktów/setów z historii, licząc od bieżącego seta i jego wyniku."""
+    if sport == "volleyball":
+        smap = m.get("set_points") or {}
+        cur_map = st.get("set_points") or {}
+    else:
+        smap = m.get("set_games") or {}
+        cur_map = st.get("set_games") or {}
+    if cur_map:
+        S = max(cur_map)
+        C = cur_map.get(S) or 0
+    else:
+        S = (st.get("sets") or 0) + 1
+        C = 0
+    if field in ("set_points", "set_games") and part:
+        hv = smap.get(part)
+        if hv is None:
+            return None
+        if part < S:
+            return 0.0
+        if part > S:
+            return float(hv)
+        if hv < C:
+            return None
+        return float(hv - C)
+    if field == "sets":
+        hs = m.get("sets")
+        if hs is None:
+            return None
+        started = S
+        completed = st.get("sets") if st.get("sets") is not None else max(0, S - 1)
+        if hs < started:
+            return None
+        return float(hs - completed)
+    if field in ("points", "games"):
+        if S not in smap or smap[S] < C:
+            return None
+        rem = smap[S] - C
+        for j in smap:
+            if j > S:
+                rem += smap[j]
+        return float(rem)
+    return None
+
+
+def remaining_from_hist(m, sport, field, part, st):
+    if sport in ("basketball", "hockey"):
+        return remaining_clock(m, sport, field, part, st)
+    if sport in ("volleyball", "tennis"):
+        return remaining_sets(m, sport, field, part, st)
+    return None
+
+
+def live_over_count(matches, field, part, line, st, sport):
+    """k/n: w ilu historycznych meczach w pozostałym czasie padło dość, by przebić linię."""
+    current = _current_for(st, field, part) or 0
+    k = n = 0
+    for m in matches or []:
+        rem = remaining_from_hist(m, sport, field, part, st)
+        if rem is None:
+            continue
+        n += 1
+        if current + rem > line:
+            k += 1
+    return k, n
+
+
+def _fmt_need(v):
+    if v is None:
+        return "?"
+    if abs(v - int(v)) < 1e-9:
+        return str(int(v))
+    return ("%g" % v).replace(".", ",")
+
+
+def live_why(k, n, ev, st, field, part, line, current, sport):
+    need = line - (current or 0)
+    clock = (st or {}).get("clock") or {}
+    rem = clock.get("rem_sec")
+    pnum = clock.get("period_num")
+    where = ""
+    if sport == "basketball" and pnum:
+        where = "w %d. kwarcie" % pnum
+    elif sport == "hockey" and pnum:
+        where = "w %d. tercji" % pnum
+    elif sport in ("volleyball", "tennis") and (part or pnum):
+        where = "w %d. secie" % (part or pnum)
+    bits = []
+    if rem is not None and where:
+        mm, ss = divmod(int(rem), 60)
+        bits.append("zostało %d:%02d %s" % (mm, ss, where))
+    elif clock.get("intermission") and where:
+        bits.append("przerwa po %s" % where)
+    elif clock.get("time_unknown"):
+        bits.append("nie mam dokładnego czasu, liczę tylko pełne pozostałe części gry")
+    elif where:
+        bits.append("w tym momencie %s" % where)
+    if need > 0:
+        bits.append("trzeba jeszcze ponad %s" % _fmt_need(need))
+    extra = (", ".join(bits) + ", ") if bits else ""
+    return ("w %d z %d meczów tych drużyn w pozostałym czasie (%s) padło tyle, ile trzeba do over %s" % (
+        k, n, extra.rstrip(", "), _fmt_need(line)))
 
 
 def make_line(home_ms, away_ms, offer, ev, st):
@@ -442,37 +701,40 @@ def make_line(home_ms, away_ms, offer, ev, st):
         return None
     current = None
     live = (ev.get("mode") == "live")
+    sport = ev.get("sport")
     if live:
         current = _current_for(st, field, part)
         if current is not None and current > line:
             return None  # zakład już by wygrał — nie typuję
-    kh, nh = _count_over(home_ms, field, line, part, current)
-    ka, na = _count_over(away_ms, field, line, part, current)
-    # po warunku nadal wymagamy sensownej próby łącznie, i historii bez warunku już sprawdzonej
+        kh, nh = live_over_count(home_ms, field, part, line, st, sport)
+        ka, na = live_over_count(away_ms, field, part, line, st, sport)
+    else:
+        kh, nh = _count_over(home_ms, field, line, part, None)
+        ka, na = _count_over(away_ms, field, line, part, None)
     k, n = kh + ka, nh + na
-    if n < MIN_SIDE:  # po warunku live za mało — nie typuję tej linii
+    if n < MIN_SIDE:
         return None
     ch = emp_chance(k, n)
     if not ch:
         return None
     why = "w %d z %d ostatnich meczów tych drużyn było ponad %s" % (
         k, n, offer["play"].replace("Over ", "", 1))
-    if live and current is not None:
-        why = ("w %d z %d podobnych meczów (już było co najmniej %s) skończyło się powyżej %s" % (
-            k, n,
-            ("%g" % current).replace(".", ","),
-            ("%g" % line).replace(".", ","),
-        ))
+    if live:
+        why = live_why(k, n, ev, st, field, part, line, current, sport)
     ln = {
         "key": offer["key"], "base": offer["base"], "field": field, "part": part,
         "scope": ev.get("sport"), "line": line, "play": offer["play"],
         "chance": ch["p"], "chance_pct": ch["pct"], "frac": ch["frac"],
         "k": k, "n": n, "kh": kh, "nh": nh, "ka": ka, "na": na,
         "why": why, "odds": offer.get("odds"),
+        "odds_under": offer.get("odds_under"),
         "current": current,
     }
     if offer.get("odds"):
-        ln = g.apply_odds_to_line(ln, {ln["key"]: offer["odds"]})
+        omap = {ln["key"]: offer["odds"]}
+        if offer.get("odds_under"):
+            omap[ln["key"] + "_under"] = offer["odds_under"]
+        ln = g.apply_odds_to_line(ln, omap)
     else:
         ln = g.fill_offer(ln)
     ln["summary"] = g.offer_text(ln, why=why)
@@ -532,6 +794,8 @@ def best_rank_line(card):
         if not odds or odds < MIN_ODDS - 1e-12:
             continue
         if (ln.get("n") or 0) < MIN_SIDE:
+            continue
+        if ln.get("unreliable") or ln.get("verdict") == "UNRELIABLE":
             continue
         cands.append(ln)
     if not cands:

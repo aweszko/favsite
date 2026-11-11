@@ -1964,7 +1964,7 @@ def parse_over_odds(odds):
 
 def _over_line_from_name(on):
     on = (on or "").strip().lower().replace(",", ".")
-    for prefix in ("powyżej ", "powyzej ", "over "):
+    for prefix in ("powyżej ", "powyzej ", "poniżej ", "ponizej ", "over ", "under ", "below "):
         if on.startswith(prefix):
             rest = on[len(prefix):].strip()
             tok = rest.split()[0] if rest else ""
@@ -2012,6 +2012,12 @@ def parse_live_goal_odds(odds):
         if price <= 1:
             continue
         key = "over%d5" % int(line) if scope == "match" else "over%d5_%s" % (int(line), scope)
+        is_under = on.startswith("poniżej") or on.startswith("ponizej") or on.startswith("under") or on.startswith("below")
+        if is_under:
+            uk = key + "_under"
+            if uk not in out or price < out[uk]:
+                out[uk] = price
+            continue
         out[key] = price
     return out
 

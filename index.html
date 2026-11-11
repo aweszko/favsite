@@ -389,7 +389,7 @@ function lineOffer(ln){
   else if(ln.verdict==='MINUS'||ln.worth==='NIE') worth='Opłaca się? NIE'+(ln.worth_because?(' ('+ln.worth_because+')'):'');
   else worth='Opłaca się? Jeszcze nie wiadomo (nie ma kursu Superbet).';
  }
- const wclass=(ln.verdict==='PLUS'||ln.worth==='TAK')?'tak':((ln.verdict==='MINUS'||ln.worth==='NIE')?'nie':'');
+ const wclass=(ln.verdict==='PLUS'||ln.worth==='TAK')?'tak':((ln.unreliable||ln.verdict==='UNRELIABLE'||ln.worth==='niepewne dane'||ln.verdict==='MINUS'||ln.worth==='NIE')?'nie':'');
  const why=ln.why?('<div><b>Dlaczego:</b> '+esc(ln.why)+'</div>'):'';
  return '<div class="oc-offer">'
   +'<div><b>Co zagrać:</b> '+esc(ln.play||'—')+'</div>'

@@ -12,6 +12,7 @@ BUCKETS = ("0-15", "16-30", "31-45+", "46-60", "61-75", "76-90+")
 MIN_N = 8
 P_MIN = 0.70
 EDGE_PLUS = 0.03          # PLUS, gdy szansa bije 1/kurs o >= 3 pp
+SANITY_EDGE = 0.15        # powyżej tego vs kurs (bez marży, gdy się da) = niepewne dane
 LIVE_RANK_P_MIN = 0.60    # próg wejścia linii do rankingu LIVE (wymaga też kursu)
 LASTX_N = 15
 W_EMP, W_POIS = 0.55, 0.45
@@ -954,6 +955,12 @@ def worth_because(line):
 def worth_text(line):
     if not line or not line.get("odds"):
         return "Opłaca się? Jeszcze nie wiadomo (nie ma kursu Superbet)."
+    if line.get("unreliable") or line.get("verdict") == "UNRELIABLE":
+        ch, imp = line.get("chance_pct"), line.get("implied_pct")
+        if ch is not None and imp is not None:
+            return ("Opłaca się? Nie typuję (niepewne dane: nasza szansa %d%% wyszła dużo wyżej "
+                    "niż to, co sugeruje kurs %d%%)." % (ch, imp))
+        return "Opłaca się? Nie typuję (niepewne dane: szansa mocno mija się z kursem)."
     bec = worth_because(line)
     if line.get("verdict") == "PLUS":
         return "Opłaca się? TAK (%s)." % bec if bec else "Opłaca się? TAK."
@@ -966,7 +973,10 @@ def fill_offer(line):
     if not line:
         return line
     line["chance_label"] = chance_win_label(line.get("chance_pct"))
-    line["worth"] = "TAK" if line.get("verdict") == "PLUS" else ("NIE" if line.get("verdict") == "MINUS" else None)
+    if line.get("unreliable") or line.get("verdict") == "UNRELIABLE":
+        line["worth"] = "niepewne dane"
+    else:
+        line["worth"] = "TAK" if line.get("verdict") == "PLUS" else ("NIE" if line.get("verdict") == "MINUS" else None)
     line["worth_because"] = worth_because(line)
     line["worth_text"] = worth_text(line)
     return line
@@ -1308,35 +1318,86 @@ def make_live_lines(dist, st):
     return lines
 
 
+def implied_from_odds(over, under=None):
+    """Szansa sugerowana przez kurs. Gdy jest też kurs na poniżej, zdejmuję marżę bukmachera."""
+    try:
+        over = float(over)
+    except (TypeError, ValueError):
+        return None
+    if not over or over <= 1:
+        return None
+    p = 1.0 / over
+    try:
+        under = float(under) if under is not None else None
+    except (TypeError, ValueError):
+        under = None
+    if under and under > 1:
+        s = p + 1.0 / under
+        if s > 0:
+            return p / s
+    return p
+
+
+def _odds_under_from_map(odds_map, key, line=None):
+    om = odds_map or {}
+    if key:
+        for k in (str(key) + "_under", (key, "under")):
+            if om.get(k):
+                return om.get(k)
+    return (line or {}).get("odds_under")
+
+
 def apply_odds_to_line(line, odds_map=None):
     """Dokleja kurs, porównanie z szansą i TAK/NIE (wewnętrznie PLUS/MINUS). Bez kursu — bez oceny."""
     out = dict(line)
-    try:
-        price = float((odds_map or {}).get(out.get("key")))
-    except (TypeError, ValueError):
-        price = None
+    om = odds_map or {}
+    key = out.get("key")
+    price = None
+    if key is not None and om.get(key) is not None:
+        try:
+            price = float(om.get(key))
+        except (TypeError, ValueError):
+            price = None
+    if price is None and out.get("odds") is not None:
+        try:
+            price = float(out.get("odds"))
+        except (TypeError, ValueError):
+            price = None
     if not price or price <= 1:
         out["odds"] = out["implied"] = out["implied_pct"] = out["edge"] = out["edge_pp"] = out["verdict"] = None
+        out["unreliable"] = False
         return fill_offer(out)
-    implied = 1.0 / price
+    under = _odds_under_from_map(om, key, out)
+    implied = implied_from_odds(price, under)
     chance = out.get("chance")
-    edge = (chance - implied) if chance is not None else None
+    edge = (chance - implied) if chance is not None and implied is not None else None
     out["odds"] = price
-    out["implied"] = round(implied, 4)
-    out["implied_pct"] = pct(implied)
+    if under:
+        try:
+            out["odds_under"] = float(under)
+        except (TypeError, ValueError):
+            pass
+    out["implied"] = None if implied is None else round(implied, 4)
+    out["implied_pct"] = None if implied is None else pct(implied)
     out["edge"] = None if edge is None else round(edge, 4)
     out["edge_pp"] = None if edge is None else int(round(100 * edge))
-    out["verdict"] = "PLUS" if (edge is not None and edge >= EDGE_PLUS - 1e-12) else "MINUS"
+    if edge is not None and edge > SANITY_EDGE + 1e-12:
+        out["verdict"] = "UNRELIABLE"
+        out["unreliable"] = True
+    else:
+        out["unreliable"] = False
+        out["verdict"] = "PLUS" if (edge is not None and edge >= EDGE_PLUS - 1e-12) else "MINUS"
     return fill_offer(out)
 
 
 def _best_offer_line(card):
     lines = [ln for ln in (card.get("lines") or []) if ln]
-    plus = [ln for ln in lines if ln.get("verdict") == "PLUS"]
+    plus = [ln for ln in lines if ln.get("verdict") == "PLUS" and not ln.get("unreliable")]
     if plus:
         pool = plus
     else:
-        pool = [ln for ln in lines if ln.get("odds")] or lines
+        ok = [ln for ln in lines if ln.get("odds") and not ln.get("unreliable") and ln.get("verdict") != "UNRELIABLE"]
+        pool = ok or [ln for ln in lines if ln.get("odds")] or lines
     if not pool:
         return card
     return max(pool, key=lambda ln: (
@@ -2118,6 +2179,8 @@ def best_rank_line(m, p_min=LIVE_RANK_P_MIN, min_odds=None):
             continue
         if min_odds is not None and odds < min_odds - 1e-12:
             continue
+        if ln.get("unreliable") or ln.get("verdict") == "UNRELIABLE":
+            continue
         cands.append(ln)
     if not cands:
         return None
@@ -2236,6 +2299,7 @@ _PUBLIC_KEYS = ("rank", "eventId", "start_warsaw", "day_warsaw", "ts", "home", "
             "chance_kickoff_pct", "chance_min20_pct", "frac_min20", "n_min20",
             "odds", "time_label", "phase", "period", "frac_base", "frac_cond", "line", "qualified",
             "need", "scope", "implied", "implied_pct", "edge", "edge_pp", "verdict",
+            "unreliable", "odds_under", "current",
             "half", "goals_so_far", "tot", "goals_1h", "goals_2h", "recommend")
 
 

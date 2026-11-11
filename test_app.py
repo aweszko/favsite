@@ -1264,8 +1264,22 @@ class TGoalOvers(unittest.TestCase):
                 "frac": "15/20", "k": 15, "n": 20}
         minus = g.apply_odds_to_line(base, {"over35": 1.22})  # implied ~82%
         self.assertEqual(minus["verdict"], "MINUS")
-        plus = g.apply_odds_to_line(base, {"over35": 1.85})   # implied ~54%, edge ~19 pp
+        plus = g.apply_odds_to_line(base, {"over35": 1.50})   # implied ~67%, edge ~6 pp
         self.assertEqual(plus["verdict"], "PLUS")
+        self.assertFalse(plus.get("unreliable"))
+        wild = g.apply_odds_to_line(dict(base, chance=0.80, chance_pct=80), {"over35": 2.45})
+        self.assertEqual(wild["verdict"], "UNRELIABLE")
+        self.assertTrue(wild.get("unreliable"))
+        self.assertIn("niepewne dane", wild.get("worth_text") or "")
+        self.assertEqual(wild.get("worth"), "niepewne dane")
+        # z kursem na poniżej: szansa bez marży
+        novig = g.implied_from_odds(2.45, 1.65)
+        raw = g.implied_from_odds(2.45)
+        self.assertAlmostEqual(raw, 1/2.45, places=4)
+        self.assertLess(novig, raw)  # po zdjęciu marży over jest niższy
+        wild2 = g.apply_odds_to_line(dict(base, chance=0.80, chance_pct=80),
+                                     {"over35": 2.45, "over35_under": 1.65})
+        self.assertEqual(wild2["verdict"], "UNRELIABLE")
         # równo 3 pp: 0.63 vs 1/1.666... ≈ 0.60
         edge3 = g.apply_odds_to_line(dict(base, chance=0.63, chance_pct=63), {"over35": 1.0 / 0.60})
         self.assertEqual(edge3["verdict"], "PLUS")
@@ -1619,45 +1633,85 @@ class TOtherOvers(unittest.TestCase):
                                    "play": "Over 220,5 punktu w meczu"}}
         self.assertIsNone(o.match_card(home, away, ev, offers))
 
+    def _bball(self, q1, q2, q3, q4):
+        tot = q1 + q2 + q3 + q4
+        def split(p):
+            a = p // 2
+            return (a, p - a)
+        return {
+            "result": split(tot), "period_pairs": {i: split(q) for i, q in enumerate((q1, q2, q3, q4), 1)},
+            "points": tot, "quarters": {1: q1, 2: q2, 3: q3, 4: q4},
+            "h2": q3 + q4, "ot_points": None,
+        }
+
     def test_live_conditions_on_current_total(self):
         import other_overs as o
-        # 10 meczów z 200 pkt, 10 z 230 — przy obecnym 210 tylko te z 230 "dochodzą"
-        home = self._ms("basketball", [200] * 10 + [230] * 10)
-        away = self._ms("basketball", [200] * 10 + [230] * 10)
+        # Stara metoda (final >= 140, potem final > 160.5) dałaby prawie 100%:
+        # wszystkie te mecze kończą się 172 albo 190. Nowa: 5:03 w 4. kwarcie,
+        # trzeba jeszcze 21 pkt, więc tylko mecze z bardzo wysoką 4. kwartą.
+        ordinary = [self._bball(40, 40, 40, 32) for _ in range(10)]   # 152 końcowe, Q4=32 → ~16 w 5 min
+        high_q4 = [self._bball(40, 40, 40, 50) for _ in range(10)]    # 170 końcowe, Q4=50 → ~25 w 5 min
+        home = ordinary + high_q4
+        away = [self._bball(42, 42, 42, 32) for _ in range(10)] + [self._bball(42, 42, 42, 50) for _ in range(10)]
         ev = {"eventId": 2, "home": "Alfa", "away": "Beta", "sport": "basketball", "mode": "live",
-              "score": "110:100", "home_score": 110, "away_score": 100,
-              "period": "4K", "minutes": 38,
+              "score": "90:50", "home_score": 90, "away_score": 50,
+              "period": "4K", "minutes": 36, "remainingPeriodTime": "5:03",
               "periods": [
-                  {"homeTeamScore": 30, "awayTeamScore": 25, "type": "FIRST_QUARTER", "num": 1},
-                  {"homeTeamScore": 25, "awayTeamScore": 25, "type": "SECOND_QUARTER", "num": 2},
-                  {"homeTeamScore": 30, "awayTeamScore": 25, "type": "THIRD_QUARTER", "num": 3},
-                  {"homeTeamScore": 25, "awayTeamScore": 25, "type": "FOURTH_QUARTER", "num": 4},
+                  {"homeTeamScore": 25, "awayTeamScore": 15, "type": "FIRST_QUARTER", "num": 1},
+                  {"homeTeamScore": 25, "awayTeamScore": 15, "type": "SECOND_QUARTER", "num": 2},
+                  {"homeTeamScore": 20, "awayTeamScore": 10, "type": "THIRD_QUARTER", "num": 3},
+                  {"homeTeamScore": 20, "awayTeamScore": 10, "type": "FOURTH_QUARTER", "num": 4},
               ]}
-        offers = {"points_220.5": {"key": "points_220.5", "base": "points", "field": "points",
-                                   "part": None, "line": 220.5, "odds": 1.70, "unit": "punktu w meczu",
-                                   "play": "Over 220,5 punktu w meczu"}}
+        offers = {"points_160.5": {"key": "points_160.5", "base": "points", "field": "points",
+                                   "part": None, "line": 160.5, "odds": 2.45, "unit": "punktu w meczu",
+                                   "play": "Over 160,5 punktu w meczu"}}
         card = o.match_card(home, away, ev, offers)
         self.assertIsNotNone(card)
         ln = card["lines"][0]
-        self.assertEqual(ln["n"], 20)  # tylko mecze, które dochodziły do 210
+        # 10+10 zwykłych Q4 nie wystarcza, 10+10 wysokich Q4 tak → 20/40
+        self.assertEqual(ln["n"], 40)
         self.assertEqual(ln["k"], 20)
-        self.assertIn("210", ln["why"])
+        self.assertLess(ln["chance"], 0.70)
+        self.assertGreater(ln["chance"], 0.35)
+        self.assertIn("pozostałym czasie", ln["why"])
+        self.assertRegex(ln["why"], r"5:0")
+        # 80% przy kursie 2,45 to byłby błąd; przy nowej szansie ~50% vs ~41% typ jest zwykły, nie „pewny 80%”
+        self.assertNotEqual(ln.get("chance_pct"), 80)
         # linia już poniżej bieżącego wyniku nie wchodzi
-        offers2 = {"points_200.5": {"key": "points_200.5", "base": "points", "field": "points",
-                                    "part": None, "line": 200.5, "odds": 1.70, "unit": "punktu w meczu",
-                                    "play": "Over 200,5 punktu w meczu"}}
+        offers2 = {"points_130.5": {"key": "points_130.5", "base": "points", "field": "points",
+                                    "part": None, "line": 130.5, "odds": 1.70, "unit": "punktu w meczu",
+                                    "play": "Over 130,5 punktu w meczu"}}
         card2 = o.match_card(home, away, ev, offers2)
-        self.assertTrue(card2 is None or not any(x["key"]=="points_200.5" for x in card2["lines"]))
+        self.assertTrue(card2 is None or not any(x["key"]=="points_130.5" for x in card2["lines"]))
+
+    def test_sanity_guard_excludes_huge_edge_from_ranking(self):
+        import other_overs as o
+        # celowo zawyżona szansa vs kurs 2,45 (~41%) — nie wolno tego typować jako TAK
+        home = [self._bball(50, 50, 50, 50) for _ in range(10)]
+        away = [self._bball(50, 50, 50, 50) for _ in range(10)]
+        ev = {"eventId": 3, "home": "Alfa", "away": "Beta", "sport": "basketball", "mode": "prematch",
+              "start_warsaw": "20:00", "day_warsaw": "2026-11-12"}
+        offers = {"points_160.5": {"key": "points_160.5", "base": "points", "field": "points",
+                                   "part": None, "line": 160.5, "odds": 2.45, "unit": "punktu w meczu",
+                                   "play": "Over 160,5 punktu w meczu"}}
+        card = o.match_card(home, away, ev, offers)
+        self.assertIsNotNone(card)
+        ln = card["lines"][0]
+        self.assertGreater(ln["chance"], 0.80)
+        self.assertEqual(ln["verdict"], "UNRELIABLE")
+        self.assertIn("niepewne dane", ln.get("worth_text") or "")
+        self.assertEqual(o.rank_cards([card]), [])
 
     def test_rank_requires_odds_130_and_unique(self):
         import other_overs as o
-        home = self._ms("hockey", [6] * 10)
-        away = self._ms("hockey", [6] * 10)
+        # 7/10 meczów z 6 golami, reszta 4 — szansa ~70%, kurs 1,55 (ok. 65%)
+        home = self._ms("hockey", [6] * 7 + [4] * 3)
+        away = self._ms("hockey", [6] * 7 + [4] * 3)
         ev = {"eventId": 9, "home": "Alfa", "away": "Beta", "sport": "hockey", "mode": "prematch",
               "start_warsaw": "19:00", "day_warsaw": "2026-11-12", "tournament": "KHL"}
         offers = {
             "goals_reg_5.5": {"key": "goals_reg_5.5", "base": "goals_reg", "field": "goals_reg",
-                              "part": None, "line": 5.5, "odds": 1.85, "unit": "gola w meczu",
+                              "part": None, "line": 5.5, "odds": 1.55, "unit": "gola w meczu",
                               "play": "Over 5,5 gola w meczu"},
             "goals_reg_4.5": {"key": "goals_reg_4.5", "base": "goals_reg", "field": "goals_reg",
                               "part": None, "line": 4.5, "odds": 1.10, "unit": "gola w meczu",
@@ -1690,6 +1744,7 @@ class TOtherOvers(unittest.TestCase):
         got = o.parse_other_odds(odds, "tennis")
         self.assertIn("games_21.5", got)
         self.assertEqual(got["games_21.5"]["odds"], 1.50)
+        self.assertEqual(got["games_21.5"].get("odds_under"), 2.25)
         self.assertIn("set_games_2_9.5", got)
         self.assertNotIn("games_22.5", got)
         self.assertEqual(len(got), 2)
