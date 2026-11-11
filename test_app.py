@@ -1288,6 +1288,35 @@ class TGoalOvers(unittest.TestCase):
         none = g.apply_odds_to_line(base, {})
         self.assertIsNone(none["verdict"])
 
+    def test_tak_uses_one_over_odds_not_novig(self):
+        """Krótki kurs: szansa 81% @ 1.12 jest na minus vs 1/kurs (~89%), nawet gdy bez marży wychodzi 77%."""
+        import goal_overs as g
+        # under 3,75: 1/1.12 ≈ 89.3%, no-vig over ok. 77% (jak przy Olaria)
+        line = {"need": 1, "scope": "match", "line": 1.5, "key": "over15",
+                "play": "Over 1.5 w meczu", "chance": 0.81, "chance_pct": 81,
+                "frac": "16/20", "k": 16, "n": 20}
+        novig = g.implied_from_odds(1.12, 3.75)
+        self.assertAlmostEqual(novig, 0.77, delta=0.02)
+        self.assertLess(novig, 1/1.12)
+        # dawniej edge vs no-vig dawał TAK; teraz musi być NIE, bo 81% < 89%
+        out = g.apply_odds_to_line(line, {"over15": 1.12, "over15_under": 3.75})
+        self.assertEqual(out["verdict"], "MINUS")
+        self.assertEqual(out["worth"], "NIE")
+        self.assertAlmostEqual(out["implied_price"], 1/1.12, places=3)
+        self.assertLess(out["chance"], out["implied_price"])
+        self.assertLess(out["edge"], 0)
+        # Castellon: 80% @ 1.18, 1/1.18 ≈ 84.7%
+        c2 = g.apply_odds_to_line(dict(line, chance=0.80, chance_pct=80, key="over05"),
+                                  {"over05": 1.18, "over05_under": 5.00})
+        self.assertEqual(c2["verdict"], "MINUS")
+        self.assertEqual(c2["worth"], "NIE")
+        # prawdziwy plus: 70% @ 1.60 (1/kurs ≈ 62.5%, +7.5 pp), nawet z under
+        plus = g.apply_odds_to_line(dict(line, chance=0.70, chance_pct=70, key="over25"),
+                                    {"over25": 1.60, "over25_under": 2.30})
+        self.assertEqual(plus["verdict"], "PLUS")
+        self.assertEqual(plus["worth"], "TAK")
+        self.assertGreaterEqual(plus["edge"], 0.03 - 1e-9)
+
     def test_pre_summary_over15_and_btts(self):
         import goal_overs as g
         # 10/10 meczów z 3 golami, obie strony strzelają
@@ -1398,6 +1427,9 @@ class TGoalOvers(unittest.TestCase):
         self.assertIn("Szansa na wygraną kuponu", app.HTML)
         self.assertIn("Brak dobrego kuponu teraz", app.HTML)
         self.assertIn("let view='kupon'", app.HTML)
+        self.assertIn("worthKind(lg)", app.HTML)
+        self.assertIn("Opłaca się?", app.HTML)
+        self.assertIn("szansę kuponu co najmniej ok. 50%", app.HTML)
         self.assertLess(app.HTML.find('data-v="kupon"'), app.HTML.find('data-v="list"'))
         self.assertIn("d.factors", app.HTML)
 
@@ -1652,6 +1684,54 @@ class TGoalOvers(unittest.TestCase):
                "missing_odds": True, "mode": "live"}
         self.assertFalse(appmod._kupon_is_tak(bad, "live"))
 
+    def test_kupon_rejects_minus_ev_even_if_flagged_tak(self):
+        import app as appmod
+        # 81% @ 1.12: 1/kurs ≈ 89% — minus, mimo starej flagi TAK i no-vig 77%
+        bad = {"eventId": 11, "home": "Olaria", "away": "America",
+               "play": "Over 1.5 w meczu", "chance": 0.81, "chance_pct": 81,
+               "odds": 1.12, "implied": 0.77, "implied_pct": 77,
+               "verdict": "PLUS", "worth": "TAK", "mode": "live",
+               "state_age_seconds": 5}
+        self.assertFalse(appmod._kupon_is_tak(bad, "live"))
+        good = dict(bad, eventId=12, odds=1.60, chance=0.70, chance_pct=70, implied=0.58)
+        self.assertTrue(appmod._kupon_is_tak(good, "live"))
+
+    def test_kupon_hides_combo_below_50_percent(self):
+        import app as appmod
+        # dwa prawdziwe TAK @ 1.55 i 70% (1/kurs ≈ 64.5%, edge ok. 5.5 pp) → iloczyn 49% < 50%
+        live = {"status": "ready", "picks": [
+            {"eventId": 1, "home": "H1", "away": "A1", "play": "Over 1.5 w meczu",
+             "odds": 1.55, "chance": 0.70, "chance_pct": 70, "verdict": "PLUS", "worth": "TAK",
+             "mode": "live", "state_age_seconds": 5},
+            {"eventId": 2, "home": "H2", "away": "A2", "play": "Over 1.5 w meczu",
+             "odds": 1.55, "chance": 0.70, "chance_pct": 70, "verdict": "PLUS", "worth": "TAK",
+             "mode": "live", "state_age_seconds": 5},
+        ]}
+        pre = {"status": "ready", "picks": [
+            {"eventId": 3, "home": "H3", "away": "A3", "play": "Over 0.5 gola w 1. połowie",
+             "odds": 1.55, "chance": 0.70, "chance_pct": 70, "verdict": "PLUS", "worth": "TAK",
+             "mode": "prematch"},
+        ]}
+        out = appmod.build_kupon_from_sources(live, pre, {"status": "ready", "picks": []})
+        # 2-leg 49% poniżej 50% (0.70*0.70=0.49); 3-leg jeszcze niżej
+        self.assertAlmostEqual(0.70 * 0.70, 0.49, places=3)
+        self.assertIsNone(out["primary"])
+        self.assertTrue(out["empty"])
+        self.assertIn("Brak dobrego kuponu teraz", out["note"])
+        # 2-leg 80%*80%=64% zostaje
+        live2 = {"status": "ready", "picks": [
+            dict(live["picks"][0], chance=0.80, chance_pct=80, odds=1.50),
+            dict(live["picks"][1], chance=0.80, chance_pct=80, odds=1.50),
+        ]}
+        out2 = appmod.build_kupon_from_sources(live2, {"status": "ready", "picks": []},
+                                               {"status": "ready", "picks": []})
+        self.assertIsNotNone(out2["primary"])
+        self.assertEqual(out2["primary"]["n"], 2)
+        self.assertEqual(out2["primary"]["chance_pct"], 64)
+        for lg in out2["primary"]["legs"]:
+            self.assertEqual(lg.get("worth"), "TAK")
+            self.assertEqual(lg.get("verdict"), "PLUS")
+
 
 class TFreshOvers(unittest.TestCase):
 
@@ -1848,14 +1928,14 @@ class TFreshOvers(unittest.TestCase):
 
     def test_kupon_skips_unreliable_stale_and_duplicates(self):
         live = {"status": "ready", "picks": [
-            self._tak(1, 1.60, 0.80, mode="live", state_age_seconds=5),
-            self._tak(9, 1.60, 0.90, mode="live", state_age_seconds=200),  # stale
+            self._tak(1, 1.50, 0.78, mode="live", state_age_seconds=5),
+            self._tak(9, 1.50, 0.78, mode="live", state_age_seconds=200),  # stale
             dict(self._tak(8, 3.00, 0.90, mode="live", state_age_seconds=5),
                  verdict="UNRELIABLE", worth="niepewne dane", unreliable=True),
         ]}
         pre = {"status": "ready", "picks": [
-            self._tak(1, 1.55, 0.85),  # same match as live
-            self._tak(2, 1.55, 0.80),
+            self._tak(1, 1.50, 0.78),  # same match as live
+            self._tak(2, 1.50, 0.78),
         ]}
         out = app.build_kupon_from_sources(live, pre, {"status": "ready", "picks": []})
         self.assertEqual(out["n_candidates"], 2)  # 1 (live) and 2 (pre); 9 and 8 dropped

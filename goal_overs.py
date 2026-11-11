@@ -12,7 +12,7 @@ BUCKETS = ("0-15", "16-30", "31-45+", "46-60", "61-75", "76-90+")
 MIN_N = 8
 P_MIN = 0.70
 EDGE_PLUS = 0.03          # PLUS, gdy szansa bije 1/kurs o >= 3 pp
-SANITY_EDGE = 0.15        # powyżej tego vs kurs (bez marży, gdy się da) = niepewne dane
+SANITY_EDGE = 0.15        # powyżej tego vs rynek bez marży (albo 1/kurs) = niepewne dane
 LIVE_RANK_P_MIN = 0.60    # próg wejścia linii do rankingu LIVE (wymaga też kursu)
 LASTX_N = 15
 W_EMP, W_POIS = 0.55, 0.45
@@ -1195,12 +1195,16 @@ def chance_win_label(pct):
 def worth_because(line):
     if not line or line.get("verdict") not in ("PLUS", "MINUS"):
         return None
-    ch, imp = line.get("chance_pct"), line.get("implied_pct")
+    ch = line.get("chance_pct")
+    # TAK/NIE liczę od 1/kurs (implied_price), nie od kursu po zdjęciu marży
+    imp = line.get("implied_price_pct")
+    if imp is None:
+        imp = line.get("implied_pct")
     if ch is None or imp is None:
         return None
     if line["verdict"] == "PLUS":
-        return "bo nasza szansa (%d%%) jest wyraźnie większa niż to, co sugeruje kurs (%d%%)" % (ch, imp)
-    return "bo kurs jest za niski na taką szansę (szansa %d%%, a kurs sugeruje %d%%)" % (ch, imp)
+        return "bo nasza szansa (%d%%) jest wyraźnie wyższa niż to, czego wymaga ten kurs (%d%%)" % (ch, imp)
+    return "bo ten kurs wymaga ok. %d%%, a ja liczę %d%%" % (imp, ch)
 
 
 def worth_text(line):
@@ -1571,7 +1575,7 @@ def make_live_lines(dist, st):
 
 
 def implied_from_odds(over, under=None):
-    """Szansa sugerowana przez kurs. Gdy jest też kurs na poniżej, zdejmuję marżę bukmachera."""
+    """Szansa sugerowana przez rynek (bez marży, gdy jest kurs na poniżej). Do kotwicy i limitu 15 pp."""
     try:
         over = float(over)
     except (TypeError, ValueError):
@@ -1588,6 +1592,57 @@ def implied_from_odds(over, under=None):
         if s > 0:
             return p / s
     return p
+
+
+def implied_price(odds):
+    """Próg opłacalności zakładu: 1/kurs. To trzeba przebić, żeby typ był na plus."""
+    try:
+        odds = float(odds)
+    except (TypeError, ValueError):
+        return None
+    if not odds or odds <= 1:
+        return None
+    return 1.0 / odds
+
+
+def offer_verdict(chance, odds, implied_fair=None):
+    """TAK tylko gdy szansa bije 1/kurs o >= 3 pp i nie odstaje od rynku o więcej niż 15 pp.
+
+    Edge do TAK/NIE liczę od 1/kurs (kurs, po którym naprawdę grasz). Limit 15 pp liczę
+    od szansy bez marży, gdy jest kurs na poniżej — inaczej krótki kurs z dużą marżą
+    wyglądałby na TAK, choć zakład jest na minus.
+    """
+    be = implied_price(odds)
+    try:
+        chance = float(chance) if chance is not None else None
+    except (TypeError, ValueError):
+        chance = None
+    out = {
+        "verdict": None, "edge": None, "edge_pp": None, "unreliable": False,
+        "implied_price": None if be is None else round(be, 4),
+        "implied_price_pct": None if be is None else pct(be),
+    }
+    if chance is None or be is None:
+        return out
+    edge = chance - be
+    try:
+        fair = float(implied_fair) if implied_fair is not None else be
+    except (TypeError, ValueError):
+        fair = be
+    if fair <= 0 or fair >= 1:
+        fair = be
+    out["edge"] = round(edge, 4)
+    out["edge_pp"] = int(round(100 * edge))
+    if (chance - fair) > SANITY_EDGE + 1e-12 or edge > SANITY_EDGE + 1e-12:
+        out["verdict"] = "UNRELIABLE"
+        out["unreliable"] = True
+    elif edge >= EDGE_PLUS - 1e-12:
+        out["verdict"] = "PLUS"
+        out["unreliable"] = False
+    else:
+        out["verdict"] = "MINUS"
+        out["unreliable"] = False
+    return out
 
 
 def _odds_under_from_map(odds_map, key, line=None):
@@ -1616,13 +1671,12 @@ def apply_odds_to_line(line, odds_map=None):
         except (TypeError, ValueError):
             price = None
     if not price or price <= 1:
-        out["odds"] = out["implied"] = out["implied_pct"] = out["edge"] = out["edge_pp"] = out["verdict"] = None
+        out["odds"] = out["implied"] = out["implied_pct"] = out["implied_price"] = out["implied_price_pct"] = out["edge"] = out["edge_pp"] = out["verdict"] = None
         out["unreliable"] = False
         return fill_offer(out)
     under = _odds_under_from_map(om, key, out)
-    implied = implied_from_odds(price, under)
+    implied = implied_from_odds(price, under)  # rynek bez marży (kotwica / limit 15 pp)
     chance = out.get("chance")
-    edge = (chance - implied) if chance is not None and implied is not None else None
     out["odds"] = price
     if under:
         try:
@@ -1631,14 +1685,13 @@ def apply_odds_to_line(line, odds_map=None):
             pass
     out["implied"] = None if implied is None else round(implied, 4)
     out["implied_pct"] = None if implied is None else pct(implied)
-    out["edge"] = None if edge is None else round(edge, 4)
-    out["edge_pp"] = None if edge is None else int(round(100 * edge))
-    if edge is not None and edge > SANITY_EDGE + 1e-12:
-        out["verdict"] = "UNRELIABLE"
-        out["unreliable"] = True
-    else:
-        out["unreliable"] = False
-        out["verdict"] = "PLUS" if (edge is not None and edge >= EDGE_PLUS - 1e-12) else "MINUS"
+    v = offer_verdict(chance, price, implied_fair=implied)
+    out["implied_price"] = v["implied_price"]
+    out["implied_price_pct"] = v["implied_price_pct"]
+    out["edge"] = v["edge"]
+    out["edge_pp"] = v["edge_pp"]
+    out["verdict"] = v["verdict"]
+    out["unreliable"] = v["unreliable"]
     return fill_offer(out)
 
 
@@ -1837,21 +1890,19 @@ def finalize_live_chance(card, tempo=None):
         ln["chance_pct"] = pct(ln["chance"])
         ln["chance_capped"] = capped
         ln["missing_odds"] = bool(missing)
-        # przelicz TAK/NIE od nowej szansy (apply_odds zostawia szansę z historii)
+        # przelicz TAK/NIE od nowej szansy vs 1/kurs (apply_odds zostawia szansę z historii)
         if missing:
             ln["edge"] = ln["edge_pp"] = ln["verdict"] = None
             ln["unreliable"] = False
-            ln["implied"] = ln.get("implied")
-        elif implied is not None and ln["chance"] is not None:
-            edge = ln["chance"] - float(implied)
-            ln["edge"] = round(edge, 4)
-            ln["edge_pp"] = int(round(100 * edge))
-            if edge > SANITY_EDGE + 1e-12:
-                ln["verdict"] = "UNRELIABLE"
-                ln["unreliable"] = True
-            else:
-                ln["unreliable"] = False
-                ln["verdict"] = "PLUS" if edge >= EDGE_PLUS - 1e-12 else "MINUS"
+            ln["implied_price"] = ln["implied_price_pct"] = None
+        else:
+            v = offer_verdict(ln.get("chance"), ln.get("odds"), implied_fair=implied)
+            ln["implied_price"] = v["implied_price"]
+            ln["implied_price_pct"] = v["implied_price_pct"]
+            ln["edge"] = v["edge"]
+            ln["edge_pp"] = v["edge_pp"]
+            ln["verdict"] = v["verdict"]
+            ln["unreliable"] = v["unreliable"]
         fill_offer(ln)
         if missing:
             ln["worth"] = None  # nigdy TAK bez kursu
@@ -1880,7 +1931,7 @@ def apply_odds_to_match(card, odds_map=None, tempo=None):
     out["recommend"] = live_recommend(out)
     best = _best_offer_line(out)
     for k in ("play", "key", "chance", "chance_pct", "frac", "k", "n",
-              "odds", "implied", "implied_pct", "edge", "edge_pp", "verdict",
+              "odds", "implied", "implied_pct", "implied_price", "implied_price_pct", "edge", "edge_pp", "verdict",
               "chance_label", "worth", "worth_because", "worth_text", "line", "scope", "why",
               "chance_hist", "chance_capped", "missing_odds"):
         if best.get(k) is not None:
@@ -2768,7 +2819,7 @@ _PUBLIC_KEYS = ("rank", "eventId", "start_warsaw", "day_warsaw", "ts", "home", "
             "p_raw", "lam", "n", "k", "conditional", "warnings", "key", "start_pl",
             "chance_kickoff_pct", "chance_min20_pct", "frac_min20", "n_min20",
             "odds", "time_label", "phase", "period", "frac_base", "frac_cond", "line", "qualified",
-            "need", "scope", "implied", "implied_pct", "edge", "edge_pp", "verdict",
+            "need", "scope", "implied", "implied_pct", "implied_price", "implied_price_pct", "edge", "edge_pp", "verdict",
             "unreliable", "odds_under", "current",
             "state_ts", "state_warsaw", "state_age_seconds", "state_label", "pending",
             "half", "goals_so_far", "tot", "goals_1h", "goals_2h", "recommend",
@@ -2777,7 +2828,7 @@ _PUBLIC_KEYS = ("rank", "eventId", "start_warsaw", "day_warsaw", "ts", "home", "
 
 
 def _round_pub(out):
-    for k in ("p_emp", "p_pois", "p_raw", "chance", "implied", "edge"):
+    for k in ("p_emp", "p_pois", "p_raw", "chance", "implied", "implied_price", "edge"):
         if out.get(k) is not None:
             try:
                 out[k] = round(float(out[k]), 4)

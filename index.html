@@ -686,7 +686,9 @@ function kuponLeg(lg, i){
   +'<div class="meta">'+(live?'<span class="oc-sp live">live</span> ':'')+bits.join(' · ')+'</div>'
   +'<div class="play">Co zagrać: '+esc(safeText(lg.play)||'—')+'</div>'
   +'<div class="row"><span class="oc-chip">Kurs '+esc(lg.odds_text||fmtOdds(lg.odds))+'</span>'
-  +'<span class="oc-chip">Szansa '+(lg.chance_pct!=null?(lg.chance_pct+'%'):'—')+'</span></div></div>';
+  +'<span class="oc-chip">Szansa '+(lg.chance_pct!=null?(lg.chance_pct+'%'):'—')+'</span>'
+  +(function(){const k=worthKind(lg);return k?('<span class="oc-badge-wrap"><small>Opłaca się?</small><span class="oc-badge '+k+'">'+worthLabel(k)+'</span></span>'):'';})()
+  +'</div></div>';
 }
 function kuponCard(c, alt){
  if(!c||!c.legs||!c.legs.length) return '';
@@ -713,7 +715,7 @@ function drawKupon(){
  const prim=OK.primary, vars=OK.variants||{};
  let h='';
  if(!prim){
-  h='<div class="empty">Brak dobrego kuponu teraz. Żeby złożyć 2 albo 3 zakłady, potrzebuję typów TAK z kursem Superbet, które razem dają co najmniej ok. 1,40. Zerknij za chwilę albo do zakładek Overy.</div>';
+  h='<div class="empty">Brak dobrego kuponu teraz. Żeby złożyć 2 albo 3 zakłady, potrzebuję typów TAK z kursem Superbet, które razem dają co najmniej ok. 1,40 i szansę kuponu co najmniej ok. 50%. Zerknij za chwilę albo do zakładek Overy.</div>';
  }else{
   h+=kuponCard(prim,false);
   const otherKey=prim.n===3?'legs2':'legs3';

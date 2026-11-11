@@ -2153,7 +2153,7 @@ def _attach_pre_line_odds(cards):
         if best:
             for k in ("key", "play", "chance", "chance_pct", "frac", "k", "n",
                       "p_emp", "p_pois", "p_raw", "lam", "why", "line",
-                      "odds", "implied", "implied_pct", "edge", "edge_pp", "verdict"):
+                      "odds", "implied", "implied_pct", "implied_price", "implied_price_pct", "edge", "edge_pp", "verdict", "worth"):
                 c[k] = best.get(k)
             c["summary"] = goal_overs.pre_line_summary(c, best)
         c["recommend"] = goal_overs.live_recommend(c)
@@ -2997,7 +2997,9 @@ def status():
 # ---------- serwer ----------
 
 KUPON_MIN_ODDS = 1.40
+KUPON_MIN_CHANCE = 0.50
 KUPON_PREF_CHANCE = 0.60
+KUPON_PREF_LEG_ODDS = 1.20
 KUPON_POOL = 12
 
 
@@ -3030,6 +3032,11 @@ def _kupon_is_tak(p, source="pre"):
         return False
     if not (p.get("play") or "").strip():
         return False
+    # nie ufaj samej fladze TAK/PLUS — przelicz vs 1/kurs i limit 15 pp
+    fair = p.get("implied")
+    v = goal_overs.offer_verdict(ch, odds, implied_fair=fair)
+    if v.get("verdict") != "PLUS" or v.get("unreliable"):
+        return False
     live = source == "live" or p.get("mode") == "live"
     if live:
         age = p.get("state_age_seconds")
@@ -3058,6 +3065,10 @@ def _kupon_leg(p, source, source_pl):
         "odds_text": goal_overs._fmt_odds(odds),
         "chance": round(ch, 4),
         "chance_pct": int(round(ch * 100)),
+        "verdict": p.get("verdict") or "PLUS",
+        "worth": p.get("worth") or "TAK",
+        "implied": p.get("implied"),
+        "implied_pct": p.get("implied_pct") or p.get("implied_price_pct"),
         "mode": "live" if live else (p.get("mode") or "prematch"),
         "score": p.get("score") if live else None,
         "time_label": p.get("time_label"),
@@ -3101,6 +3112,7 @@ def _kupon_combo(legs):
         "chance": round(chance, 4),
         "chance_pct": int(round(chance * 100)),
         "meets_chance": chance + 1e-12 >= KUPON_PREF_CHANCE,
+        "meets_min_chance": chance + 1e-12 >= KUPON_MIN_CHANCE,
     }
 
 
@@ -3115,7 +3127,15 @@ def _kupon_pick_size(pool, n):
             chance *= float(lg["chance"])
         if odds + 1e-12 < KUPON_MIN_ODDS:
             continue
-        qual = (1 if chance + 1e-12 >= KUPON_PREF_CHANCE else 0, chance, odds)
+        if chance + 1e-12 < KUPON_MIN_CHANCE:
+            continue
+        pref_legs = all(float(lg["odds"]) + 1e-12 >= KUPON_PREF_LEG_ODDS for lg in combo)
+        qual = (
+            1 if pref_legs else 0,
+            1 if chance + 1e-12 >= KUPON_PREF_CHANCE else 0,
+            chance,
+            odds,
+        )
         if best is None or qual > best[0]:
             best = (qual, combo)
     if not best:
@@ -3160,8 +3180,9 @@ def build_kupon_from_sources(live, pre, other):
         note = ("Szukam typów TAK do kuponu. To chwilę trwa — nic nie zmyślam i nic nie jest stawiane.")
     else:
         status = "ready"
-        note = ("Brak dobrego kuponu teraz. Żeby złożyć 2 albo 3 zakłady, potrzebuję typów TAK z kursem Superbet, "
-                "które razem dają co najmniej ok. 1,40. Zerknij za chwilę albo do zakładek Overy.")
+        note = ("Brak dobrego kuponu teraz. Żeby złożyć 2 albo 3 zakłady, potrzebuję typów TAK "
+                "(szansa wyższa od 1/kurs o co najmniej 3 pp) z kursem Superbet, które razem dają "
+                "co najmniej ok. 1,40 i szansę kuponu co najmniej ok. 50%. Zerknij za chwilę albo do zakładek Overy.")
     feed = (live or {}).get("feed_warsaw") or (other or {}).get("feed_warsaw")
     return {
         "status": status,
@@ -3174,10 +3195,13 @@ def build_kupon_from_sources(live, pre, other):
         "sources": sources,
         "note": note,
         "rule": ("Składam kupon z 2 albo 3 typów TAK z Overy LIVE, przedmeczowych i innych sportów. "
-                 "Każdy mecz tylko raz. Bez niepewnych danych i bez nieświeżego stanu live. "
+                 "TAK tylko gdy moja szansa bije 1/kurs o co najmniej 3 punkty procentowe i nie odstaje "
+                 "od rynku o więcej niż 15 pp. Każdy mecz tylko raz. Bez niepewnych danych i bez nieświeżego stanu live. "
+                 "Chętnie każdy zakład z kursem ok. 1,20 albo wyższym. "
                  "Kurs kuponu = iloczyn kursów. Szansa na wygraną kuponu = iloczyn szans przy założeniu, "
                  "że mecze są niezależne (uproszczenie). Cel: kurs kuponu ok. 1,40 albo wyższy, "
-                 "chętnie szansa ok. 60% albo wyższa. Forma, nie gwarancja. Nic nie jest stawiane."),
+                 "chętnie szansa ok. 60% albo wyższa. Poniżej 50% nie pokazuję kuponu. "
+                 "Forma, nie gwarancja. Nic nie jest stawiane."),
         "empty": primary is None and not computing,
     }
 
