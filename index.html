@@ -335,7 +335,7 @@ h+=P.length?P.map(card).join(''):'<div class="empty">Brak wystarczająco mocnych
 h+=`<div class="hfoot">${esc(O.note||'')}<br>Sprawdzonych meczów: ${(O.footer&&O.footer.matches)||0} · za słabe: ${(O.footer&&O.footer.too_weak)||0} · bez danych: ${(O.footer&&O.footer.without_stats)||0}<details style="margin-top:6px;text-align:left"><summary>Jak liczona jest szansa</summary>${esc(O.rule||'')}</details></div>`;
 $('#op').innerHTML=h;
 const e=Object.entries(O.errors||{});
-$('#st').innerHTML=`Aktualizacja: ${esc(O.generated_warsaw||'')} (Warszawa)`+(O.stale?' · odświeżam w tle':'')+(O.status=='computing'?' · liczę kolejną rundę…':'')+(e.length?`<div class="err">Błąd źródła: ${esc(e.map(x=>x.join(': ')).join('; '))}</div>`:'')}
+$('#st').innerHTML=`Aktualizacja: ${esc(O.generated_warsaw||'')} (Warszawa)`+(O.source=='seed'?' · dane startowe, liczę aktualne w tle':O.source=='mixed'?' · część kart z zrzutu, liczę resztę w tle':'')+(O.stale&&O.source=='live'?' · odświeżam w tle':'')+(O.status=='computing'&&O.source!='seed'&&O.source!='mixed'?' · liczę kolejną rundę…':'')+(e.filter(x=>x[0]!='overy_job').length?`<div class="err">Błąd źródła: ${esc(e.filter(x=>x[0]!='overy_job').map(x=>x.join(': ')).join('; '))}</div>`:'')}
 async function loadOvers(){clearTimeout(ot);
 try{O=await (await fetch('/api/goal-overs?_='+Date.now(),{cache:'no-store'})).json();if(view=='overs')drawOvers()}catch(e){if(view=='overs')$('#st').innerHTML='<span class="err">Błąd: '+esc(e)+'</span>'}
 if(view=='overs')ot=setTimeout(loadOvers,O&&O.status=='computing'?4000:60000)}

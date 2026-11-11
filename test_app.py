@@ -954,6 +954,93 @@ class TGoalOvers(unittest.TestCase):
         self.assertIn("Najpewniejsze overy dnia", app.HTML)
         self.assertIn("Szansa:", app.HTML)
 
+    def test_seed_payload_has_chances(self):
+        seed = app._seed_payload(now_ts=1_794_400_000)  # 11.11.2026 rano UTC
+        self.assertIsNotNone(seed)
+        self.assertGreaterEqual(len(seed["picks"]), 8)
+        p = seed["picks"][0]
+        self.assertIsInstance(p.get("chance_pct"), int)
+        self.assertGreaterEqual(p["chance_pct"], 70)
+        self.assertRegex(p.get("frac") or "", r"\d+/\d+")
+        self.assertTrue(p.get("play"))
+
+    def test_seed_drops_old_matches(self):
+        seed = app._seed_payload(now_ts=2_000_000_000)
+        self.assertTrue(seed is None or not seed.get("picks"))
+
+    def test_no_second_worker_while_job_runs(self):
+        import time
+        old = dict(app.OVERS_STATE)
+        started = []
+        real = app.threading.Thread
+        class Fake:
+            def __init__(self, *a, **k):
+                started.append(1)
+            def start(self):
+                pass
+        try:
+            app.OVERS_STATE.update(
+                res={"picks": [{"chance_pct": 90, "play": "Over 0.5 gola w 2. połowie", "frac": "9/10", "home": "A", "away": "B"}],
+                     "source": "seed", "partial": False},
+                t=0,
+                job={"progress": {"done": 1, "total": 10}, "started": time.time(), "beat": time.time(), "cancel": False},
+            )
+            app.threading.Thread = Fake
+            out = app.get_overs()
+            self.assertEqual(started, [])
+            self.assertTrue(out.get("picks"))
+            self.assertEqual(out["picks"][0]["chance_pct"], 90)
+            self.assertEqual(out["status"], "computing")
+        finally:
+            app.threading.Thread = real
+            app.OVERS_STATE.clear()
+            app.OVERS_STATE.update(old)
+
+    def test_merge_prefers_live_and_keeps_unused_seed(self):
+        import time
+        live = [{"chance": 0.99, "n": 20, "ts": 1, "eventId": 1, "play": "LIVE",
+                 "enter": "e", "why": "w", "frac": "20/20", "chance_pct": 99,
+                 "home": "A", "away": "B"}]
+        seed = [
+            {"eventId": 1, "chance": 0.8, "chance_pct": 80, "play": "SEED", "n": 10, "ts": time.time() + 3600},
+            {"eventId": 2, "chance": 0.9, "chance_pct": 90, "play": "SEED2", "n": 10, "ts": time.time() + 3600},
+        ]
+        picks, src = app._merge_picks(live, set(), seed)
+        self.assertEqual(src, "mixed")
+        self.assertEqual(picks[0]["play"], "LIVE")
+        self.assertEqual(picks[1]["play"], "SEED2")
+        picks2, src2 = app._merge_picks(live, {2}, seed)
+        self.assertEqual(src2, "live")
+        self.assertEqual(len(picks2), 1)
+
+    def test_disk_cache_survives_memory_clear(self):
+        import tempfile, shutil
+        old = app.CACHE_DIR
+        d = tempfile.mkdtemp()
+        calls = {"n": 0}
+        def fn():
+            calls["n"] += 1
+            return {"ok": 1}
+        try:
+            app.CACHE_DIR = d
+            app.CACHE.pop("unit:test", None)
+            v1 = app.cached("unit:test", 7200, fn)
+            v2 = app.cached("unit:test", 7200, fn)
+            self.assertEqual(v1, {"ok": 1})
+            self.assertEqual(calls["n"], 1)
+            app.CACHE.pop("unit:test", None)
+            v3 = app.cached("unit:test", 7200, fn)
+            self.assertEqual(v3, {"ok": 1})
+            self.assertEqual(calls["n"], 1)
+        finally:
+            app.CACHE_DIR = old
+            app.CACHE.pop("unit:test", None)
+            shutil.rmtree(d, ignore_errors=True)
+
+    def test_history_capped_for_free_plan(self):
+        self.assertEqual(app.OVERS_HISTORY, 10)
+        self.assertLessEqual(app.OVERS_MATCH_MAX, 50)
+
 
 if __name__ == "__main__":
     unittest.main()
