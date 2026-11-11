@@ -1722,24 +1722,60 @@ def _merge_picks(live_cards, processed_ids, seed_picks=None, live_1h=None, seed_
     return picks, picks_1h, source
 
 
+def _rank_pre_unique(cards, require_odds=True):
+    if require_odds:
+        rows = goal_overs.rank_live_lines(cards)
+        if rows:
+            return rows
+    # bez kursów (albo żaden PLUS/próg): jeden mecz raz, najlepsza linia wg szansy
+    return goal_overs.rank_unique_by_chance(cards)
+
+
 def _publish_overs(cards, evs, today, tomorrow, skipped, processed_ids, partial, seed_picks=None, cards_1h=None, seed_1h=None):
-    picks, picks_1h, source = _merge_picks(cards, processed_ids, seed_picks, live_1h=cards_1h, seed_1h=seed_1h)
     if not partial:
-        _attach_over_odds(picks)
-        _attach_over_odds(picks_1h)
+        _attach_pre_line_odds(cards)
+    ranked = _rank_pre_unique(cards, require_odds=not partial)
+    # merge z seedem tylko na czas pierwszego liczenia, bez duplikowania eventId
+    ranked_ids = {r.get("eventId") for r in ranked}
+    extras = []
+    if partial:
+        for p in seed_picks or []:
+            eid = p.get("eventId")
+            if eid in ranked_ids or eid in processed_ids:
+                continue
+            if _seed_still_relevant(p):
+                extras.append(dict(p))
+        extras.sort(key=lambda c: (-(c.get("chance") or 0), -(c.get("n") or 0)))
+    room = max(0, goal_overs.MAX_PICKS - len(ranked))
+    picks = [goal_overs.public_line_card(r) for r in ranked] + extras[:room]
+    for i, p in enumerate(picks, 1):
+        p["rank"] = i
+    # 1H osobno zostaje dla zgodności seed/testów, ale UI korzysta z jednego rankingu
+    picks_1h, source_1h_unused = _merge_list(cards_1h or [], processed_ids, seed_1h)
+    if not partial:
+        source = "live"
+    elif ranked and extras[:room]:
+        source = "mixed"
+    elif ranked:
+        source = "live"
+    else:
+        source = "seed" if (seed_picks or extras) else "live"
+    pub_matches = [goal_overs.public_match_card(c) for c in cards if c]
     now = datetime.now(timezone.utc)
     res = {
         "generated_warsaw": to_warsaw(now).strftime("%Y-%m-%d %H:%M:%S"),
         "today_warsaw": today, "tomorrow_warsaw": tomorrow,
         "picks": picks, "n_picks": len(picks),
         "picks_1h": picks_1h, "n_picks_1h": len(picks_1h),
+        "matches": pub_matches, "n_matches": len(pub_matches),
         "source": source, "partial": partial,
         "footer": {"matches": len(evs), "checked": len(processed_ids),
                    "without_stats": skipped.get("nostats", 0),
                    "too_weak": skipped.get("thin", 0), "min_n": goal_overs.MIN_N,
-                   "p_min": goal_overs.P_MIN},
+                   "p_min": goal_overs.LIVE_RANK_P_MIN,
+                   "edge_plus": goal_overs.EDGE_PLUS},
         "rule": goal_overs.CHANCE_RULE,
-        "note": "Tylko mocne schematy (min. 8 meczów, szansa łączona ≥ 70%). Forma, nie gwarancja. Nic nie jest stawiane.",
+        "note": "Każdy mecz raz. Ranking bierze pod uwagę over 0.5/1.5/2.5 w 1. połowie, 2. połowie i w meczu (szansa ≥ 60% i kurs, wg przewagi szansa − 1/kurs). PLUS, gdy model bije kurs o co najmniej 3 pp. Forma, nie gwarancja. Nic nie jest stawiane.",
     }
     with LOCK:
         OVERS_STATE.update(res=res, t=time.time() if not partial else OVERS_STATE["t"] or time.time())
@@ -1772,7 +1808,7 @@ def _overs_one(ev):
                     mode=ev.get("mode") or "prematch", minutes=ev.get("minutes"),
                     score=ev.get("score"), br=ev.get("br"),
                     start_pl=("%s %s" % (ev.get("day_warsaw") or "", ev.get("start_warsaw") or "")).strip())
-        card = goal_overs.pick_pre_for_match(hp, ap, meta)
+        card = goal_overs.pre_match_card(hp, ap, meta)
         card_1h = goal_overs.pick_1h_for_match(hp, ap, meta)
         return ev, "ok", card, card_1h
     except Exception as ex:
@@ -1983,6 +2019,21 @@ def event_live_goal_odds(eid):
     return cached("liveodds:%s" % eid, LIST_TTL, f) or {}
 
 
+def event_goal_line_odds(eid, ttl=600):
+    """Wszystkie proste linie over (mecz/1H/2H) z /events/{id}, cache dłuższy na przedmeczowe."""
+    if not eid:
+        return {}
+    def f():
+        d = http_json("%s/events/%s" % (SB, eid), "Superbet")
+        if not d:
+            return None
+        ev = d.get("data")
+        if isinstance(ev, list):
+            ev = ev[0] if ev else {}
+        return parse_live_goal_odds((ev or {}).get("odds"))
+    return cached("goalodds:%s" % eid, ttl, f) or {}
+
+
 def event_over_odds(eid):
     if not eid:
         return {}
@@ -2018,6 +2069,37 @@ def _attach_over_odds(picks):
             p["odds"] = price
             p["summary"] = goal_overs.pre_summary(p)
     return picks
+
+
+def _attach_pre_line_odds(cards):
+    """Dokleja kursy do wszystkich linii beforemeczowych i odświeża najlepszą linię."""
+    eids, seen = [], set()
+    for c in cards or []:
+        eid = c.get("eventId")
+        if eid and eid not in seen:
+            seen.add(eid)
+            eids.append(eid)
+    if not eids:
+        return cards
+    got = {}
+    with ThreadPoolExecutor(OVERS_WORKERS) as ex:
+        for eid, od in zip(eids, ex.map(event_goal_line_odds, eids)):
+            got[eid] = od or {}
+    for c in cards or []:
+        od = got.get(c.get("eventId")) or {}
+        updated = goal_overs.apply_odds_to_match(c, od)
+        c.clear(); c.update(updated)
+        best = goal_overs.best_rank_line(c) or (
+            max(c.get("lines") or [], key=lambda ln: (ln.get("chance") or 0, ln.get("n") or 0))
+            if c.get("lines") else None)
+        if best:
+            for k in ("key", "play", "chance", "chance_pct", "frac", "k", "n",
+                      "p_emp", "p_pois", "p_raw", "lam", "why", "line",
+                      "odds", "implied", "implied_pct", "edge", "edge_pp", "verdict"):
+                c[k] = best.get(k)
+            c["summary"] = goal_overs.pre_line_summary(c, best)
+        c["recommend"] = goal_overs.live_recommend(c)
+    return cards
 
 
 # ---------- Overy LIVE (tylko mecze trwające) ----------
@@ -2168,7 +2250,7 @@ def _publish_live_overs(evs, partial=False, fetch_odds=False):
                    "p_min": goal_overs.LIVE_RANK_P_MIN,
                    "edge_plus": goal_overs.EDGE_PLUS},
         "rule": goal_overs.CHANCE_RULE,
-        "note": "Tylko mecze LIVE. Szansa dotyczy goli w pozostałym czasie bieżącej połowy (1H: do przerwy; przerwa/2H: w 2. połowie) i linii over w połowie oraz — o przerwie i w 2H — analogicznego over w meczu. Ranking: linie z szansą ≥ 60% i kursem Superbet, wg przewagi (szansa − 1/kurs). PLUS, gdy model bije kurs o co najmniej 3 pp. Mała próba to ostrzeżenie, nie ukrywanie. Forma, nie gwarancja. Nic nie jest stawiane.",
+        "note": "Tylko mecze LIVE. Szansa dotyczy goli w pozostałym czasie bieżącej połowy (1H: do przerwy; przerwa/2H: w 2. połowie) i linii over w połowie oraz — o przerwie i w 2H — analogicznego over w meczu. Ranking: każdy mecz tylko raz, pozycję wyznacza najlepsza linia (szansa ≥ 60% i kurs, wg przewagi szansa − 1/kurs). PLUS, gdy model bije kurs o co najmniej 3 pp. Mała próba to ostrzeżenie, nie ukrywanie. Forma, nie gwarancja. Nic nie jest stawiane.",
     }
     with LOCK:
         LIVE_OVERS_STATE.update(res=res, t=time.time())

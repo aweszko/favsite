@@ -371,16 +371,26 @@ def chance_half_at_minute(home, away, t, half, goals_so_far=0):
     return chance_block(k, n, lam, 0.5)
 
 
+def _frac_block(sample, need):
+    k = sum(1 for _, rem in sample if rem >= need)
+    n = len(sample)
+    return {"k": k, "n": n, "frac": frac(k, n)}
+
+
 def remaining_goals_dist(home, away, t, half, goals_so_far=0):
     """Rozkład liczby goli w pozostałym czasie połowy: szanse na 1+, 2+ i 3+ (Laplace + Poisson)."""
-    sample = _half_remaining_sample(
-        (home.get("matches") or []) + (away.get("matches") or []), t, half, goals_so_far)
+    sample_h = _half_remaining_sample(home.get("matches") or [], t, half, goals_so_far)
+    sample_a = _half_remaining_sample(away.get("matches") or [], t, half, goals_so_far)
+    sample = sample_h + sample_a
     n = len(sample)
     lam = _mean([rem for _, rem in sample]) if sample else None
     by_need = {}
     for need in (1, 2, 3):
         k = sum(1 for _, rem in sample if rem >= need)
-        by_need[need] = chance_block(k, n, lam, need - 0.5)
+        ch = chance_block(k, n, lam, need - 0.5)
+        ch["home"] = _frac_block(sample_h, need)
+        ch["away"] = _frac_block(sample_a, need)
+        by_need[need] = ch
     return {
         "n": n, "lam": None if lam is None else round(lam, 3),
         "half": half, "t": t, "goals_so_far": int(goals_so_far),
@@ -819,46 +829,145 @@ def pick_1h_for_match(home, away, meta=None, p_min=P_MIN, min_n=MIN_N):
 
 PRE_KEYS = ("over15", "over25", "over05_1h", "over05_2h", "btts")
 
+PRE_OVER_SPEC = (
+    ("over05_1h", "1h", 0.5, "tot_1h", "Over 0.5 gola w 1. połowie", "Gol w 1. połowie padł"),
+    ("over15_1h", "1h", 1.5, "tot_1h", "Over 1.5 gola w 1. połowie", "2+ gole w 1. połowie padły"),
+    ("over25_1h", "1h", 2.5, "tot_1h", "Over 2.5 gola w 1. połowie", "3+ gole w 1. połowie padły"),
+    ("over05_2h", "2h", 0.5, "tot_2h", "Over 0.5 gola w 2. połowie", "Gol w 2. połowie padł"),
+    ("over15_2h", "2h", 1.5, "tot_2h", "Over 1.5 gola w 2. połowie", "2+ gole w 2. połowie padły"),
+    ("over25_2h", "2h", 2.5, "tot_2h", "Over 2.5 gola w 2. połowie", "3+ gole w 2. połowie padły"),
+    ("over05", "match", 0.5, "tot", "Over 0.5 w meczu", "Gol w meczu padł"),
+    ("over15", "match", 1.5, "tot", "Over 1.5 w meczu", "2+ gole w meczu padły"),
+    ("over25", "match", 2.5, "tot", "Over 2.5 w meczu", "3+ gole w meczu padły"),
+)
 
-def pick_pre_for_match(home, away, meta=None, p_min=P_MIN, min_n=MIN_N):
-    """Najmocniejszy typ przedmeczowy (1.5 / 2.5 / 0.5 1H / 0.5 2H / BTTS)."""
-    best = None
-    for card in qualifying_cards(home, away, meta, p_min=p_min, min_n=min_n):
-        if card.get("key") not in PRE_KEYS:
+
+def _thresh_sample(matches, field, line):
+    """k/n i średnia dla P(X > line), np. over 1.5 => tot >= 2."""
+    need = int(line) + 1
+    ok = [m for m in (matches or []) if m and m.get(field) is not None]
+    k = sum(1 for m in ok if m[field] >= need)
+    lam = _mean([m[field] for m in ok])
+    return k, len(ok), lam
+
+
+def pre_over_lines(home, away):
+    """Over 0.5 / 1.5 / 2.5 w 1H, 2H i w meczu, z ułamkiem łącznym i osobno na drużynę."""
+    lines = []
+    for key, scope, line, field, play, why_verb in PRE_OVER_SPEC:
+        kh, nh, lamh = _thresh_sample(home.get("matches") or [], field, line)
+        ka, na, lama = _thresh_sample(away.get("matches") or [], field, line)
+        k, n = kh + ka, nh + na
+        ch = chance_block(k, n, _mean2(lamh, lama), line)
+        if ch.get("p") is None or not n:
             continue
-        card = dict(card)
-        card["summary"] = pre_summary(card)
-        if best is None or (card["chance"], card["n"]) > (best["chance"], best["n"]):
-            best = card
-    return best
+        why = "%s w %s meczach tych drużyn" % (why_verb, ch.get("frac") or "—")
+        if nh or na:
+            why += " (osobno gospodarze %s, goście %s)" % (frac(kh, nh) or "—", frac(ka, na) or "—")
+        lines.append({
+            "need": int(line) + 1, "scope": scope, "line": line, "key": key, "play": play,
+            "chance": ch["p"], "chance_pct": ch["pct"],
+            "frac": ch["frac"], "k": ch["k"], "n": ch["n"],
+            "p_emp": ch["p_emp"], "p_pois": ch["p_pois"], "p_raw": ch["p_raw"],
+            "lam": ch.get("lam"), "why": why,
+            "home": {"k": kh, "n": nh, "frac": frac(kh, nh)},
+            "away": {"k": ka, "n": na, "frac": frac(ka, na)},
+            "odds": None, "implied": None, "implied_pct": None,
+            "edge": None, "edge_pp": None, "verdict": None,
+        })
+    return lines
+
+
+def _pre_when(card):
+    t = card.get("start_warsaw") or ""
+    d = card.get("day_warsaw") or ""
+    if d and t:
+        parts = str(d).split("-")
+        short = ("%s.%s" % (parts[2], parts[1])) if len(parts) == 3 else d
+        return "%s (%s, Warszawa)" % (t, short)
+    if t:
+        return "%s (Warszawa)" % t
+    if d:
+        return "%s (Warszawa)" % d
+    return ""
+
+
+def pre_line_summary(card, line=None):
+    line = line or card
+    home = card.get("home") or card.get("home_name") or "?"
+    away = card.get("away") or card.get("away_name") or "?"
+    head = "%s – %s" % (home, away)
+    lg = card.get("tournament") or card.get("category") or ""
+    when = _pre_when(card)
+    bits = [head]
+    if lg:
+        bits.append(lg)
+    if when:
+        bits.append(when)
+    play = line.get("play") or "ten typ"
+    typ = play[0].lower() + play[1:] if play else "ten typ"
+    odds_s = (" @%s" % _fmt_odds(line["odds"])) if line.get("odds") else ""
+    pct_s = ("ok. %d%%" % line["chance_pct"]) if line.get("chance_pct") is not None else "—"
+    implied_s = (" (kurs zakłada %d%%)" % line["implied_pct"]) if line.get("implied_pct") is not None else ""
+    why = line.get("why") or ""
+    if why and not why.endswith("."):
+        why += "."
+    return "%s. Zagraj %s%s. Szansa %s%s. %s" % (". ".join(bits) if False else ", ".join(bits), typ, odds_s, pct_s, implied_s, why)
 
 
 def pre_summary(card):
-    play = card.get("play") or "ten typ"
-    typ = play[0].lower() + play[1:] if play else "ten typ"
-    fr = card.get("frac") or "—"
-    pct_s = card.get("chance_pct")
-    chance_s = ("ok. %d%%" % pct_s) if pct_s is not None else "—"
-    key = card.get("key")
-    if key == "over15":
-        body = "Padły 2+ gole w %s meczach tych drużyn." % fr
-    elif key == "over25":
-        body = "Padły 3+ gole w %s meczach tych drużyn." % fr
-    elif key == "over05_1h":
-        body = "Gol w 1. połowie padł w %s meczach tych drużyn." % fr
-        ch20 = card.get("frac_min20")
-        if card.get("chance_min20_pct") is not None and ch20:
-            body += " Przy 0:0 po 20. min w %s." % ch20
-    elif key == "over05_2h":
-        body = "Gol w 2. połowie padł w %s meczach tych drużyn." % fr
-    elif key == "btts":
-        body = "Obie drużyny strzeliły w %s meczach tych drużyn." % fr
-    else:
-        body = "Schemat wszedł w %s meczach tych drużyn." % fr
-    text = "Warto rozważyć %s. %s Szansa: %s." % (typ, body, chance_s)
-    if card.get("odds"):
-        text += " Kurs Superbet: %s." % _fmt_odds(card["odds"])
-    return text
+    """Podpis karty przedmeczowej — zawsze z nazwami, ligą i godziną (Warszawa)."""
+    return pre_line_summary(card, card)
+
+
+def pre_match_card(home, away, meta=None):
+    """Mecz przedmeczowy: 9 linii over 0.5/1.5/2.5 × 1H/2H/mecz."""
+    meta = meta or {}
+    lines = pre_over_lines(home, away)
+    if not lines:
+        return None
+    card = {
+        "home": home.get("name") or meta.get("home"),
+        "away": away.get("name") or meta.get("away"),
+        "mode": "prematch",
+        "lines": lines,
+        "warnings": context_warnings(meta),
+        "conditional": False,
+    }
+    if meta:
+        for k, v in meta.items():
+            card.setdefault(k, v)
+    # pola „główne” z najmocniejszej linii wg szansy (kurs dochodzi później)
+    top = max(lines, key=lambda ln: (ln.get("chance") or 0, ln.get("n") or 0))
+    for k in ("key", "play", "chance", "chance_pct", "frac", "k", "n",
+              "p_emp", "p_pois", "p_raw", "lam", "why", "line"):
+        card[k] = top.get(k)
+    # ostrzeżenie o małej próbie na głównej linii
+    if (top.get("n") or 0) < 12:
+        card["warnings"] = list(card["warnings"]) + [
+            "próba %d meczów — to nadal mało, traktuj ostrożnie" % (top.get("n") or 0)]
+    for prof, lab in ((home, "gospodarz"), (away, "gość")):
+        if prof and (prof.get("n") or 0) < MIN_N:
+            card["warnings"].append("mała próba %s: %d meczów" % (lab, prof.get("n") or 0))
+    card["summary"] = pre_line_summary(card, top)
+    card["recommend"] = live_recommend(card)
+    return card
+
+
+def pick_pre_for_match(home, away, meta=None, p_min=P_MIN, min_n=MIN_N):
+    """Karta przedmeczowa; None tylko gdy żadna linia nie spełnia starego progu (zgodność testów)."""
+    card = pre_match_card(home, away, meta)
+    if not card:
+        return None
+    # jeśli jest linia z n i szansą powyżej progu, zostaw kartę (główna = najmocniejsza ogółem)
+    strong = [ln for ln in (card.get("lines") or [])
+              if (ln.get("n") or 0) >= min_n and ln.get("chance") is not None and ln["chance"] >= p_min
+              and (home.get("n") or 0) >= min_n and (away.get("n") or 0) >= min_n]
+    if not strong:
+        return None
+    return card
+
+
 
 
 def _fmt_odds(x):
@@ -1125,11 +1234,42 @@ def apply_odds_to_line(line, odds_map=None):
     return out
 
 
+def live_recommend(card):
+    plus = [ln for ln in (card.get("lines") or []) if ln.get("verdict") == "PLUS"]
+    if not plus:
+        priced = [ln for ln in (card.get("lines") or []) if ln.get("odds")]
+        if not priced:
+            return "Brak aktualnego kursu Superbet — nie ma jeszcze oceny."
+        return "Nic tu nie opłaca się przy obecnych kursach."
+    best = max(plus, key=lambda ln: (
+        ln.get("edge") if ln.get("edge") is not None else -99,
+        ln.get("n") or 0, ln.get("chance") or 0))
+    typ = best.get("play") or "ten typ"
+    typ_s = typ[0].lower() + typ[1:] if typ else "ten typ"
+    why = best.get("why") or ""
+    if why and not why.endswith("."):
+        why += "."
+    return "Najlepsza opcja: Zagraj %s @%s. Szansa ok. %d%% (kurs zakłada %d%%). %s" % (
+        typ_s, _fmt_odds(best["odds"]), best.get("chance_pct") or 0,
+        best.get("implied_pct") or 0, why)
+
+
 def apply_odds_to_match(card, odds_map=None):
     if not card:
         return card
     out = dict(card)
     out["lines"] = [apply_odds_to_line(ln, odds_map) for ln in (card.get("lines") or [])]
+    out["recommend"] = live_recommend(out)
+    if out.get("detail") is not None:
+        det = dict(out["detail"])
+        det["recommend"] = out["recommend"]
+        # odśwież zdanie o kolejnym golu o kurs i PLUS/MINUS
+        raw = det.get("next_goal") or ""
+        # zdejmij ewentualne stare doklejenie kursu, potem dodaj aktualne
+        if " Kurs Superbet @" in raw:
+            raw = raw.split(" Kurs Superbet @", 1)[0].strip()
+        det["next_goal"] = priced_next_goal_text(raw, out)
+        out["detail"] = det
     return out
 
 
@@ -1175,6 +1315,271 @@ def _primary_line(lines):
     return (lines or [None])[0]
 
 
+def _sides_clause(ch):
+    h = (ch or {}).get("home") or {}
+    a = (ch or {}).get("away") or {}
+    bits = []
+    if h.get("frac"):
+        bits.append("gospodarze %s" % h["frac"])
+    if a.get("frac"):
+        bits.append("goście %s" % a["frac"])
+    if not bits:
+        return ""
+    return " (osobno %s)" % ", ".join(bits)
+
+
+def _half_already_text(half, goals_so_far):
+    side = "1. połowie" if half == 1 else "2. połowie"
+    if not goals_so_far:
+        return "W %s nie padł jeszcze gol." % side
+    if goals_so_far == 1:
+        return "W %s padł już 1 gol." % side
+    return "W %s padły już %d gole." % (side, goals_so_far)
+
+
+def _total_goals_phrase(total, half):
+    if half == 1:
+        if total <= 1:
+            return "gol do przerwy padł"
+        return "%d+ gole do przerwy padły" % total
+    if total <= 1:
+        return "gol w 2. połowie padł"
+    return "%d+ gole w 2. połowie padły" % total
+
+
+def _team_half_scoring(matches, half, t=None):
+    """Gole strzelone przez tę drużynę w danej połowie (z minut, jeśli są)."""
+    buckets_keys = ("0-15", "16-30", "31-45+") if half == 1 else ("46-60", "61-75", "76-90+")
+    buckets = {b: 0 for b in buckets_keys}
+    goals = n = n_scored = rem = 0
+    n_tl = 0
+    for m in matches or []:
+        if not m:
+            continue
+        if m.get("timeline_ok") and m.get("scored") is not None:
+            sc = 0
+            n_tl += 1
+            for g in m.get("scored") or []:
+                if g.get("half") != half:
+                    continue
+                sc += 1
+                b = g.get("bucket")
+                if b in buckets:
+                    buckets[b] += 1
+                if t is not None:
+                    try:
+                        if int(g.get("minute") or 0) > int(t):
+                            rem += 1
+                    except (TypeError, ValueError):
+                        pass
+        else:
+            sc = m.get("gf_1h") if half == 1 else m.get("gf_2h")
+            if sc is None:
+                continue
+        n += 1
+        goals += int(sc or 0)
+        if (sc or 0) >= 1:
+            n_scored += 1
+    return {
+        "goals": goals, "n": n, "k_scored": n_scored, "frac_scored": frac(n_scored, n),
+        "buckets": buckets, "rem_goals": rem, "n_tl": n_tl,
+    }
+
+
+def phase_scoring(home, away, half, t=None):
+    H = _team_half_scoring(home.get("matches") or [], half, t)
+    A = _team_half_scoring(away.get("matches") or [], half, t)
+    h_rate = (H["goals"] / H["n"]) if H["n"] else 0
+    a_rate = (A["goals"] / A["n"]) if A["n"] else 0
+    if H["n"] and A["n"]:
+        leader = "home" if h_rate > a_rate else ("away" if a_rate > h_rate else "equal")
+    elif H["n"]:
+        leader = "home"
+    elif A["n"]:
+        leader = "away"
+    else:
+        leader = None
+    return {"home": H, "away": A, "leader": leader, "half": half}
+
+
+def _plus_counts(vals, thresholds=(1, 2, 3, 4)):
+    out = []
+    for th in thresholds:
+        out.append((th, sum(1 for v in vals if v >= th)))
+    return out
+
+
+def prior_half_context(home, away, st, t=None, goals_so_far=0):
+    """Rozkład goli bieżącej połowy pod warunkiem wyniku wcześniejszej (np. 1H 0:0)."""
+    if (st or {}).get("phase") not in ("ht", "2h"):
+        return None
+    matches = [m for m in ((home.get("matches") or []) + (away.get("matches") or []))
+               if m and m.get("tot_1h") is not None and m.get("tot_2h") is not None]
+    n_all = len(matches)
+    if not n_all:
+        return None
+    p1 = st.get("p1")
+    label = None
+    sample = []
+    if p1 and p1[0] is not None and p1[1] is not None:
+        hh, aa = int(p1[0]), int(p1[1])
+        sample = [m for m in matches if m.get("ht_home") == hh and m.get("ht_away") == aa]
+        label = "1. połowa %d:%d" % (hh, aa)
+    elif st.get("goals_1h") is not None:
+        g1 = int(st["goals_1h"])
+        sample = [m for m in matches if m.get("tot_1h") == g1]
+        if g1 == 0:
+            label = "1. połowa 0:0"
+        elif g1 == 1:
+            label = "w 1. połowie padł 1 gol"
+        else:
+            label = "w 1. połowie padły %d gole" % g1
+    if not label:
+        return None
+    n = len(sample)
+    twos = [m.get("tot_2h") or 0 for m in sample]
+    parts = ["%d+ goli w 2. połowie w %d" % (th, k) for th, k in _plus_counts(twos)]
+    text = "W %d/%d meczach tych drużyn %s." % (n, n_all, label)
+    if n:
+        text += " Z tych %d meczów: %s." % (n, ", ".join(parts))
+        if n < 8:
+            text += " Próba %d meczów — to mało, traktuj ostrożnie." % n
+    else:
+        text += " Brak meczów z takim wynikiem 1. połowy — nie da się podać rozkładu 2. połowy."
+    given_now = None
+    if st.get("phase") == "2h" and t is not None and n:
+        rems = []
+        for m in sample:
+            if not m.get("timeline_ok"):
+                continue
+            mins = _half_goal_minutes(m, 2)
+            by_t = sum(1 for x in mins if x <= int(t))
+            if by_t != int(goals_so_far):
+                continue
+            rems.append(sum(1 for x in mins if x > int(t)))
+        if rems:
+            n2 = len(rems)
+            now_parts = []
+            for extra in (1, 2, 3):
+                k = sum(1 for rem in rems if rem >= extra)
+                total = int(goals_so_far) + extra
+                now_parts.append("%d+ gole łącznie w 2. połowie w %s" % (total, frac(k, n2)))
+            given_now = (
+                "Przy tym samym wyniku 1. połowy i %d golach już w 2. połowie po %d. minucie: %s."
+                % (int(goals_so_far), int(t), "; ".join(now_parts))
+            )
+            if n2 < 8:
+                given_now += " Próba %d meczów — to mało, traktuj ostrożnie." % n2
+    return {"text": text, "given_now": given_now, "n": n, "n_all": n_all, "label": label}
+
+
+def priced_next_goal_text(base, card):
+    """Dokleja kurs i PLUS/MINUS do zdania o kolejnym golu w połowie."""
+    ln = None
+    for x in (card.get("lines") or []):
+        if x.get("need") == 1 and x.get("scope") == "half":
+            ln = x
+            break
+    if not ln or not ln.get("odds"):
+        return base
+    verd = ln.get("verdict")
+    verd_s = " — PLUS" if verd == "PLUS" else (" — MINUS" if verd == "MINUS" else "")
+    extra = "Kurs Superbet @%s (zakłada %s%%)%s." % (
+        _fmt_odds(ln["odds"]),
+        ln["implied_pct"] if ln.get("implied_pct") is not None else "—",
+        verd_s,
+    )
+    base = (base or "").strip()
+    if base and not base.endswith("."):
+        base += "."
+    return ("%s %s" % (base, extra)).strip()
+
+
+def build_live_detail(card, dist, home, away, st):
+    """Teksty szczegółów: stan, warunek 2+/3+, kolejny gol, kto strzela, przedziały 15-min."""
+    half = dist.get("half") or card.get("half") or 1
+    gsf = dist.get("goals_so_far")
+    if gsf is None:
+        gsf = card.get("goals_so_far") or 0
+    t = dist.get("t") if dist.get("t") is not None else st.get("t_ref")
+    phase = st.get("phase") or card.get("phase")
+    score = card.get("score") or st.get("score_s") or "–"
+    tl = card.get("time_label") or st.get("time_label") or "live"
+    state = "Wynik %s, %s. %s" % (score, tl, _half_already_text(half, gsf))
+    by = dist.get("by_need") or {}
+    # kolejny gol = 1+ w pozostałym czasie
+    nxt = by.get(1) or {}
+    if half == 1:
+        when = "do końca 1. połowy od %d. minuty" % t if t is not None else "do przerwy"
+    elif phase == "ht":
+        when = "do końca 2. połowy od przerwy"
+    else:
+        when = "do końca 2. połowy od %d. minuty" % t if t is not None else "w 2. połowie"
+    nxt_frac = nxt.get("frac") or "—"
+    nxt_s = "Szansa na kolejnego gola %s: ok. %s%% (padł w %s meczach tych drużyn%s)." % (
+        when, nxt["pct"] if nxt.get("pct") is not None else "—", nxt_frac, _sides_clause(nxt))
+    cond = []
+    for extra in (1, 2, 3):
+        total = int(gsf) + extra
+        if total < 2 and extra != 1:
+            continue
+        if extra == 1:
+            continue  # 1+ jest w zdaniu o kolejnym golu; 2+ i 3+ (łącznie w połowie) niżej
+        ch = by.get(extra) or {}
+        if not ch.get("n"):
+            continue
+        phrase = _total_goals_phrase(total, half)
+        cond.append("%s w %s meczach tych drużyn%s." % (
+            phrase[0].upper() + phrase[1:], ch.get("frac") or "—", _sides_clause(ch)))
+    # jeśli gsf>=1, pierwsze cond to (gsf+1)+ czyli 2+ gdy był 1 gol — user explicitly wants 2+ and 3+
+    # extra 1 was skipped; add total=gsf+1 if gsf>=1 (2+ when 1 already)
+    if int(gsf) >= 1:
+        ch = by.get(1) or {}
+        if ch.get("n"):
+            phrase = _total_goals_phrase(int(gsf) + 1, half)
+            cond.insert(0, "%s w %s meczach tych drużyn%s." % (
+                phrase[0].upper() + phrase[1:], ch.get("frac") or "—", _sides_clause(ch)))
+    sc = phase_scoring(home, away, half, t)
+    H, A = sc["home"], sc["away"]
+    fase = "1. połowie" if half == 1 else "2. połowie"
+    if sc["leader"] == "home":
+        who = "częściej strzelali gospodarze"
+    elif sc["leader"] == "away":
+        who = "częściej strzelali goście"
+    elif sc["leader"] == "equal":
+        who = "obie strony strzelały podobnie"
+    else:
+        who = None
+    scoring = None
+    if who and (H["n"] or A["n"]):
+        scoring = (
+            "W %s %s: %d goli gospodarzy w %d meczach, wobec %d goli gości w %d meczach "
+            "(gola w tej fazie strzelili w %s i %s meczach)." % (
+                fase, who, H["goals"], H["n"], A["goals"], A["n"],
+                H.get("frac_scored") or "—", A.get("frac_scored") or "—")
+        )
+    buckets_txt = None
+    if H.get("n_tl") or A.get("n_tl"):
+        keys = list(H["buckets"].keys())
+        parts = []
+        for b in keys:
+            parts.append("%s gospod. %d, goście %d" % (b.replace("-", "–"), H["buckets"].get(b, 0), A["buckets"].get(b, 0)))
+        buckets_txt = "Przedziały 15-min w %s: %s." % (fase, "; ".join(parts))
+    prior = prior_half_context(home, away, st, t, gsf)
+    nxt_s = priced_next_goal_text(nxt_s, card)
+    return {
+        "state": state,
+        "next_goal": nxt_s,
+        "cond": cond,
+        "given_1h": None if not prior else prior["text"],
+        "given_1h_now": None if not prior else prior.get("given_now"),
+        "scoring": scoring,
+        "buckets": buckets_txt,
+        "recommend": card.get("recommend"),
+        "scoring_raw": sc,
+    }
+
+
 def live_match_card(home, away, meta=None):
     """Mecz live: rozkład 1+/2+/3+ goli w pozostałym czasie bieżącej połowy i linie over."""
     meta = meta or {}
@@ -1211,7 +1616,8 @@ def live_match_card(home, away, meta=None):
     card["dist"] = {
         need: {"frac": ch.get("frac"), "k": ch.get("k"), "n": ch.get("n"),
                "chance": ch.get("p"), "chance_pct": ch.get("pct"),
-               "p_emp": ch.get("p_emp"), "p_pois": ch.get("p_pois"), "lam": ch.get("lam")}
+               "p_emp": ch.get("p_emp"), "p_pois": ch.get("p_pois"), "lam": ch.get("lam"),
+               "home": ch.get("home"), "away": ch.get("away")}
         for need, ch in (dist.get("by_need") or {}).items()
     }
     card["half"] = half
@@ -1224,6 +1630,8 @@ def live_match_card(home, away, meta=None):
         (used.get("n") or 0) >= MIN_N and used.get("p") is not None and used["p"] >= P_MIN
         and (home.get("n") or 0) >= MIN_N and (away.get("n") or 0) >= MIN_N)
     card["summary"] = live_summary(card, why)
+    card["detail"] = build_live_detail(card, dist, home, away, st)
+    card["recommend"] = live_recommend(card)
     return card
 
 
@@ -1232,27 +1640,86 @@ def pick_live_for_match(home, away, meta=None, p_min=P_MIN, min_n=MIN_N):
     return live_match_card(home, away, meta)
 
 
+def _line_sort_key(ln):
+    return (-(ln.get("edge") if ln.get("edge") is not None else -99),
+            -ln.get("n", 0), -ln.get("chance", 0), ln.get("ts") or 0)
+
+
+def best_rank_line(m, p_min=LIVE_RANK_P_MIN):
+    """Najlepsza linia meczu do rankingu: szansa ≥ p_min i jest kurs, wg przewagi."""
+    cands = []
+    for ln in (m.get("lines") or []):
+        if ln.get("chance") is None or ln["chance"] < p_min:
+            continue
+        if not ln.get("odds") or ln.get("odds") <= 1:
+            continue
+        cands.append(ln)
+    if not cands:
+        return None
+    cands.sort(key=_line_sort_key)
+    return cands[0]
+
+
 def rank_live_lines(matches, limit=MAX_PICKS, p_min=LIVE_RANK_P_MIN):
-    """Ranking linii: szansa >= p_min i jest kurs, sortowane wg przewagi (szansa − 1/kurs)."""
+    """Ranking: każdy mecz tylko raz; pozycję wyznacza jego najlepsza linia."""
     rows = []
+    seen = set()
     for m in matches or []:
         if not m:
             continue
-        for ln in m.get("lines") or []:
-            if ln.get("chance") is None or ln["chance"] < p_min:
-                continue
-            if not ln.get("odds") or ln.get("odds") <= 1:
-                continue
-            row = dict(ln)
-            for k in ("eventId", "home", "away", "home_name", "away_name", "score",
-                      "time_label", "phase", "minutes", "period", "tournament",
-                      "category", "start_warsaw", "day_warsaw", "ts", "warnings"):
-                if k not in row or row.get(k) is None:
-                    row[k] = m.get(k)
+        eid = m.get("eventId")
+        uniq = eid if eid is not None else id(m)
+        if uniq in seen:
+            continue
+        ln = best_rank_line(m, p_min)
+        if not ln:
+            continue
+        seen.add(uniq)
+        row = dict(ln)
+        for k in ("eventId", "home", "away", "home_name", "away_name", "score",
+                  "time_label", "phase", "minutes", "period", "tournament",
+                  "category", "start_warsaw", "day_warsaw", "ts", "warnings", "recommend"):
+            if k not in row or row.get(k) is None:
+                row[k] = m.get(k)
+        row["summary"] = live_line_summary(m, ln)
+        rows.append(row)
+    rows.sort(key=_line_sort_key)
+    for i, r in enumerate(rows[:limit], 1):
+        r["rank"] = i
+    return rows[:limit]
+
+
+def rank_unique_by_chance(matches, limit=MAX_PICKS, p_min=LIVE_RANK_P_MIN):
+    """Jeden wiersz na mecz, bez wymogu kursu — używane zanim dojść kursy albo gdy żaden nie przechodzi progu z kursem."""
+    rows = []
+    seen = set()
+    for m in matches or []:
+        if not m:
+            continue
+        eid = m.get("eventId")
+        uniq = eid if eid is not None else id(m)
+        if uniq in seen:
+            continue
+        cands = [ln for ln in (m.get("lines") or [])
+                 if ln.get("chance") is not None and ln["chance"] >= p_min and (ln.get("n") or 0) >= MIN_N]
+        if not cands and m.get("chance") is not None and m["chance"] >= p_min:
+            cands = [m]
+        if not cands:
+            continue
+        ln = max(cands, key=lambda x: (x.get("chance") or 0, x.get("n") or 0))
+        seen.add(uniq)
+        row = dict(ln)
+        for k in ("eventId", "home", "away", "home_name", "away_name", "score",
+                  "time_label", "phase", "minutes", "period", "tournament",
+                  "category", "start_warsaw", "day_warsaw", "ts", "warnings", "recommend"):
+            if row.get(k) is None:
+                row[k] = m.get(k)
+        if m.get("mode") == "live":
             row["summary"] = live_line_summary(m, ln)
-            rows.append(row)
-    rows.sort(key=lambda r: (-(r.get("edge") if r.get("edge") is not None else -99),
-                             -r.get("n", 0), -r.get("chance", 0), r.get("ts") or 0))
+        else:
+            row["summary"] = pre_line_summary(m, ln)
+        rows.append(row)
+    rows.sort(key=lambda r: (-(r.get("chance") or 0), -r.get("n", 0), r.get("ts") or 0))
     for i, r in enumerate(rows[:limit], 1):
         r["rank"] = i
     return rows[:limit]
@@ -1273,7 +1740,7 @@ _PUBLIC_KEYS = ("rank", "eventId", "start_warsaw", "day_warsaw", "ts", "home", "
             "chance_kickoff_pct", "chance_min20_pct", "frac_min20", "n_min20",
             "odds", "time_label", "phase", "period", "frac_base", "frac_cond", "line", "qualified",
             "need", "scope", "implied", "implied_pct", "edge", "edge_pp", "verdict",
-            "half", "goals_so_far", "tot", "goals_1h", "goals_2h")
+            "half", "goals_so_far", "tot", "goals_1h", "goals_2h", "recommend")
 
 
 def _round_pub(out):
@@ -1305,6 +1772,9 @@ def public_match_card(c):
                 except (TypeError, ValueError):
                     pass
         out["dist"][str(need)] = block
+    if c.get("detail"):
+        out["detail"] = c.get("detail")
+    out["recommend"] = c.get("recommend")
     return _round_pub(out)
 
 
@@ -1323,6 +1793,6 @@ CHANCE_RULE = (
     "W zakładce LIVE liczony jest rozkład liczby goli w pozostałym czasie bieżącej połowy (1H: do przerwy; przerwa/2H: w 2. połowie): szansa na 1+, 2+ i 3+ goli, "
     "przeliczona na linie over (aktualna suma połowy +0.5/+1.5/+2.5) oraz — o przerwie i w 2. połowie, gdy w meczu zostają już tylko te gole — na analogiczne over w meczu. "
     "Przy kursie Superbet podawana jest szansa modelu, szansa z kursu (1/kurs) i ocena PLUS (model bije kurs o co najmniej 3 pp) albo MINUS. "
-    "Ranking 1–10 obejmuje linie z szansą ≥ 60% i kursem, uszeregowane wg przewagi (szansa − 1/kurs). Mała próba to ostrzeżenie, nie ukrywanie meczu. "
+    "Ranking 1–10: każdy mecz tylko raz, pozycję wyznacza najlepsza linia (szansa ≥ 60% i kurs, wg przewagi szansa − 1/kurs). Przed meczem liczone są over 0.5/1.5/2.5 w 1. połowie, 2. połowie i w meczu; ranking też bierze pod uwagę linie 1. połowy. Mała próba to ostrzeżenie, nie ukrywanie meczu. "
     "Podawany jest procent i ułamek źródłowy k/n. To częstość + model, nie gwarancja."
 )

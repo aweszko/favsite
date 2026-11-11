@@ -97,6 +97,13 @@ input:focus,button:focus-visible{outline:2px solid var(--g);outline-offset:1px}.
 .oc-rank b{color:var(--g)}
 .plus{color:#5ad67a;font-weight:800}
 .minus{color:#e07070;font-weight:800}
+.oc-rank{cursor:pointer}
+.oc-rank:hover{border-color:#c9a227}
+.oc-rank.open{border-radius:12px 12px 0 0;margin-bottom:0;border-color:#c9a227}
+.oc-detail{margin:0 12px 12px;padding:14px;border:1px solid #c9a227;border-top:0;border-radius:0 0 12px 12px;background:#120e08}
+.oc-detail .row{margin:6px 0}
+.oc-detail .rec{font-size:15px;font-weight:700;color:var(--g3);margin:10px 0 8px}
+.oc-chev{float:right;color:var(--s);font-size:12px}
 .lt{width:100%;border-collapse:collapse;font-size:13px;margin-top:8px}
 .lt th,.lt td{padding:5px 6px;border-bottom:1px solid #1f1a0c;text-align:left}
 .lt th{color:var(--s);font-size:11px;font-weight:600}
@@ -125,8 +132,8 @@ input:focus,button:focus-visible{outline:2px solid var(--g);outline-offset:1px}.
 <div id="pro" hidden><div class="vnote">Pewniaki PRO · Etap 1: lista obserwowanych (kryteria ost. 5) · Etap 2: typ dopiero LIVE przy pełnej dominacji i presji w ost. 10 min · <b>Typy to spełnione kryteria, nie gwarancja</b></div><div id="pp"></div></div>
 <div id="worst" hidden><div class="vnote">Dziurawe obrony · tylko mecze LIVE · temperatura obrony z ost. 5 meczów (5/5) z korektą siły rywala · <b>forma, nie gwarancja</b></div><div id="wp"></div></div>
 <div id="next" hidden><div class="vnote">Następny gol · twarde sita na top 3 · rywal dziurawej strzeli <b>następnego</b> gola · forma + presja teraz, nie gwarancja · brak kolejnego gola = pudło</div><div id="np"></div></div>
-<div id="overs-live" hidden><div class="vnote">Overy LIVE · wszystkie mecze trwające · rozkład 1+/2+/3+ goli w pozostałym czasie bieżącej połowy · kurs Superbet, szansa modelu i 1/kurs · PLUS gdy model bije kurs o ≥ 3 pp · odświeżanie co ok. 60 s · <b>forma, nie gwarancja</b></div><div id="opl"></div></div>
-<div id="overs-pre" hidden><div class="vnote">Overy przedmeczowe · nadchodzące mecze · na mecz jeden najmocniejszy typ (over 1.5 / 2.5 / 0.5 w 1. połowie / 0.5 w 2. połowie / BTTS) i kurs Superbet, jeśli jest · <b>forma, nie gwarancja</b></div><div id="opp"></div></div>
+<div id="overs-live" hidden><div class="vnote">Overy LIVE · każdy mecz raz · kliknij mecz, żeby zobaczyć szczegóły · kurs Superbet, PLUS/MINUS · odświeżanie co ok. 60 s · <b>forma, nie gwarancja</b></div><div id="opl"></div></div>
+<div id="overs-pre" hidden><div class="vnote">Overy przedmeczowe · każdy mecz raz · nazwy, liga, godzina (Warszawa) · kliknij, żeby zobaczyć over 0.5/1.5/2.5 w 1. połowie, 2. połowie i w meczu · PLUS/MINUS · <b>forma, nie gwarancja</b></div><div id="opp"></div></div>
 <footer>Źródła: Superbet PL (oferta, kursy 1X2), Sportradar (statystyki strzałów). Godziny: Europe/Warsaw. Brak danych = „brak danych”, nic nie jest szacowane.</footer>
 <script>
 const $=s=>document.querySelector(s);let view='list',tab='live',rmode='all',M=null,R=null,open={};
@@ -350,49 +357,119 @@ function verdictBadge(v){
  return '';
 }
 function fmtOdds(x){return (x==null||x==='')?'—':String(x).replace('.',',')}
-function oversRankLineLive(c){
- return '<div class="oc-rank"><b>#'+c.rank+'.</b> '+esc(c.summary||'')+verdictBadge(c.verdict)+'</div>';
+function whenWarsaw(c){
+ const t=c.start_warsaw||'';
+ const d=c.day_warsaw||'';
+ if(d&&t){const p=String(d).split('-');const short=(p.length===3)?(p[2]+'.'+p[1]):d;return t+' ('+short+', Warszawa)';}
+ if(t)return t+' (Warszawa)';
+ if(d)return d+' (Warszawa)';
+ return '';
 }
-function oversMatchTable(m){
- const warn=(m.warnings&&m.warnings.length)?'<div class="warn">'+m.warnings.map(w=>'⚠️ '+esc(w)).join('<br>')+'</div>':'';
+function findMatch(list, eid){
+ if(eid==null||eid==='')return null;
+ const id=String(eid);
+ return (list||[]).find(m=>String(m.eventId)===id)||null;
+}
+function linesTable(m){
  const rows=(m.lines||[]).map(ln=>{
   const v=ln.verdict==='PLUS'?'<span class="plus">PLUS</span>':(ln.verdict==='MINUS'?'<span class="minus">MINUS</span>':'—');
   const imp=ln.implied_pct!=null?ln.implied_pct+'%':'—';
   const ch=(ln.chance_pct!=null?ln.chance_pct+'%':'–')+' ('+esc(ln.frac||'–')+')';
   return '<tr><td>'+esc(ln.play||'')+'</td><td>'+fmtOdds(ln.odds)+'</td><td>'+ch+'</td><td>'+imp+'</td><td>'+v+'</td></tr>';
  }).join('');
- const lg=m.tournament||m.category||'';
- return '<div class="oc"><div class="mt">'+(m.time_label?esc(m.time_label):'live')+(lg?' · '+esc(lg):'')+'<br><b>'+esc(m.home||m.home_name||'')+' – '+esc(m.away||m.away_name||'')+(m.score?' · '+esc(m.score):'')+'</b></div>'
-  +'<div class="row">Szansa na 1+/2+/3+ goli w pozostałym czasie tej połowy, z historii obu drużyn (Laplace + Poisson), przeliczona na linie over.</div>'
-  +'<table class="lt"><thead><tr><th>Linia</th><th>Kurs</th><th>Szansa modelu</th><th>Kurs zakłada</th><th>Ocena</th></tr></thead><tbody>'+rows+'</tbody></table>'
+ if(!rows)return '';
+ return '<table class="lt"><thead><tr><th>Linia</th><th>Kurs</th><th>Szansa modelu</th><th>Kurs zakłada</th><th>Ocena</th></tr></thead><tbody>'+rows+'</tbody></table>';
+}
+function oversLiveDetail(m){
+ if(!m)return '<div class="oc-detail"><div class="row">Brak szczegółów dla tego meczu.</div></div>';
+ const d=m.detail||{};
+ const warn=(m.warnings&&m.warnings.length)?'<div class="warn">'+m.warnings.map(w=>'⚠️ '+esc(w)).join('<br>')+'</div>':'';
+ const cond=(d.cond||[]).map(s=>'<div class="row">'+esc(s)+'</div>').join('');
+ const rec=d.recommend||m.recommend||'';
+ return '<div class="oc-detail">'
+  +'<div class="row"><b>'+esc((m.home||m.home_name||'')+' – '+(m.away||m.away_name||''))+'</b>'+(m.score?' · '+esc(m.score):'')+(m.time_label?' · '+esc(m.time_label):'')+'</div>'
+  +(d.state?'<div class="row">'+esc(d.state)+'</div>':'')
+  +(d.given_1h?'<div class="row">'+esc(d.given_1h)+'</div>':'')
+  +(d.given_1h_now?'<div class="row">'+esc(d.given_1h_now)+'</div>':'')
+  +cond
+  +(d.next_goal?'<div class="row">'+esc(d.next_goal)+'</div>':'')
+  +(d.scoring?'<div class="row">'+esc(d.scoring)+'</div>':'')
+  +(d.buckets?'<div class="row">'+esc(d.buckets)+'</div>':'')
+  +linesTable(m)
+  +(rec?'<div class="rec">'+esc(rec)+'</div>':'')
   +warn+'</div>';
+}
+function oversPreDetail(m){
+ if(!m)return '<div class="oc-detail"><div class="row">Brak szczegółów dla tego meczu.</div></div>';
+ const d=m.detail||{};
+ const warn=(m.warnings&&m.warnings.length)?'<div class="warn">'+m.warnings.map(w=>'⚠️ '+esc(w)).join('<br>')+'</div>':'';
+ const rec=d.recommend||m.recommend||'';
+ const when=whenWarsaw(m);
+ const lg=m.tournament||m.category||'';
+ return '<div class="oc-detail">'
+  +'<div class="row"><b>'+esc((m.home||m.home_name||'')+' – '+(m.away||m.away_name||''))+'</b>'+(lg?' · '+esc(lg):'')+(when?' · '+esc(when):'')+'</div>'
+  +'<div class="row">Szansa na over 0.5, 1.5 i 2.5 osobno w 1. połowie, 2. połowie i w meczu, z historii obu drużyn (ułamek k/n i model).</div>'
+  +linesTable(m)
+  +(rec?'<div class="rec">'+esc(rec)+'</div>':'')
+  +warn+'</div>';
+}
+function oversRankRow(c, kind, openId, matches){
+ const name=esc((c.home||c.home_name||'')+' – '+(c.away||c.away_name||''));
+ const lg=c.tournament||c.category||'';
+ const when=kind==='pre'?whenWarsaw(c):(c.time_label||'');
+ const meta=[when,lg].filter(Boolean).join(' · ');
+ const play=c.play||'';
+ const ch=c.chance_pct!=null?('Szansa ok. '+c.chance_pct+'%'):'';
+ const odds=c.odds!=null?(' @'+fmtOdds(c.odds)):'';
+ const implied=c.implied_pct!=null?(' (kurs zakłada '+c.implied_pct+'%)'):'';
+ const why=c.why?(' '+c.why+(String(c.why).endsWith('.')?'':'.')):'';
+ const eid=c.eventId!=null?String(c.eventId):'';
+ const open=openId!=null&&eid!==''&&String(openId)===eid;
+ const rank=c.rank?('<b>#'+c.rank+'.</b> '):'';
+ const row='<div class="oc-rank'+(open?' open':'')+'" data-eid="'+esc(eid)+'" role="button" aria-expanded="'+(open?'true':'false')+'"><span class="oc-chev">'+(open?'▼':'▶')+'</span>'+rank+'<b>'+name+'</b>'+(meta?' <span class="mt">'+esc(meta)+'</span>':'')+'<br>Zagraj '+esc(play)+odds+'. '+ch+implied+'.'+esc(why)+verdictBadge(c.verdict)+'</div>';
+ if(!open)return row;
+ const m=findMatch(matches,eid)||c;
+ return row+(kind==='live'?oversLiveDetail(m):oversPreDetail(m));
+}
+let OL_OPEN=null, OP_OPEN=null;
+function bindOversClicks(box, kind){
+ box.onclick=function(ev){
+  const row=ev.target.closest('[data-eid]');
+  if(!row)return;
+  const id=row.getAttribute('data-eid');
+  if(!id)return;
+  if(kind==='live'){OL_OPEN=(OL_OPEN===id)?null:id;drawOversLive()}
+  else{OP_OPEN=(OP_OPEN===id)?null:id;drawOversPre()}
+ };
 }
 function drawOversInto(d, mount, live){
  if(!d)return;
  const box=$(mount);
  const hasLive=d.picks&&d.picks.length||d.matches&&d.matches.length;
  if(d.status=='computing'&&!hasLive&&!(d.picks&&d.picks.length)){const p=d.progress||{};box.innerHTML='<div class="empty">Liczą się overy w tle… ('+(p.done||0)+'/'+(p.total||'?')+'). Pierwsze liczenie może potrwać chwilę — strona nie blokuje się.</div>';return}
- if(live){
-  const P=d.picks||[], M=d.matches||[];
-  let h='<div class="nf"><h3>Ranking 1–10</h3></div>';
-  if(!P.length)h+='<div class="empty">Teraz żadna linia nie ma jednocześnie szansy ≥ 60% i kursu Superbet. Niżej widać wszystkie mecze live z historią i tabelą linii.</div>';
-  else h+=P.map(oversRankLineLive).join('');
-  if(M.length){h+='<div class="nf" style="margin-top:18px"><h3>Wszystkie mecze live</h3></div>';h+=M.map(oversMatchTable).join('');}
-  h+=`<div class="hfoot">${esc(d.note||'')}<br>Meczów: ${(d.footer&&d.footer.matches)!=null?d.footer.matches:(d.live_matches||0)} · z historią: ${d.n_matches||M.length} · bez danych: ${(d.footer&&d.footer.without_stats)||0}<details style="margin-top:6px;text-align:left"><summary>Jak liczona jest szansa</summary>${esc(d.rule||'')}</details></div>`;
-  box.innerHTML=h;
- }else{
-  const P=d.picks||[];
-  let h='<div class="nf"><h3>Ranking 1–10</h3></div>';
-  if(!P.length)h+='<div class="empty">Brak wystarczająco mocnych typów przedmeczowych (min. 8 meczów i szansa ≥ 70%).</div>';
-  else h+=P.map(c=>oversRankLine(c,false)).join('');
-  if(P.length){h+='<div class="nf" style="margin-top:18px"><h3>Karty</h3></div>';h+=P.map(c=>oversCard(c,false)).join('');}
-  h+=`<div class="hfoot">${esc(d.note||'')}<br>Meczów: ${(d.footer&&d.footer.matches)!=null?d.footer.matches:0} · za słabe: ${(d.footer&&d.footer.too_weak)||0} · bez danych: ${(d.footer&&d.footer.without_stats)||0}<details style="margin-top:6px;text-align:left"><summary>Jak liczona jest szansa</summary>${esc(d.rule||'')}</details></div>`;
-  box.innerHTML=h;
+ const P=d.picks||[], M=d.matches||[];
+ const kind=live?'live':'pre';
+ const openId=live?OL_OPEN:OP_OPEN;
+ let h='<div class="nf"><h3>Ranking 1–10</h3></div>';
+ if(!P.length)h+='<div class="empty">'+(live?'Teraz żadna linia nie ma jednocześnie szansy ≥ 60% i kursu Superbet. Kliknij mecz niżej, żeby zobaczyć szczegóły.':'Brak typów z szansą ≥ 60%. Kliknij mecz niżej, żeby zobaczyć linie 1. połowy, 2. połowy i meczu.')+'</div>';
+ else h+=P.map(c=>oversRankRow(c,kind,openId,M)).join('');
+ if(M.length){
+  h+='<div class="nf" style="margin-top:18px"><h3>'+(live?'Wszystkie mecze live':'Wszystkie mecze przedmeczowe')+'</h3></div>';
+  const inRank=new Set(P.map(c=>String(c.eventId||'')));
+  h+=M.map(m=>{
+   const c=Object.assign({},m);
+   if(inRank.has(String(m.eventId||''))){/* w rankingu też można rozwinąć; tu lista bez # jeśli już wyżej */c.rank=c.rank||null;}
+   return oversRankRow(c,kind,openId,M);
+  }).join('');
  }
+ const footMatches=(d.footer&&d.footer.matches)!=null?d.footer.matches:(d.live_matches||M.length||0);
+ h+=`<div class="hfoot">${esc(d.note||'')}<br>Meczów: ${footMatches} · z historią: ${d.n_matches||M.length} · bez danych: ${(d.footer&&d.footer.without_stats)||0}<details style="margin-top:6px;text-align:left"><summary>Jak liczona jest szansa</summary>${esc(d.rule||'')}</details></div>`;
+ box.innerHTML=h;
+ bindOversClicks(box, kind);
  const e=Object.entries(d.errors||{}).filter(x=>x[0]!='overy_job'&&x[0]!='overy_live_job');
  let st=`Aktualizacja: ${esc(d.generated_warsaw||'')} (Warszawa)`;
- if(live) st+=' · wszystkie mecze LIVE · odświeżanie co ok. 60 s';
- else st+=(d.source=='seed'?' · dane startowe, liczę aktualne w tle':d.source=='mixed'?' · część kart z zrzutu, liczę resztę w tle':'');
+ if(live) st+=' · każdy mecz raz · odświeżanie co ok. 60 s';
+ else st+=(d.source=='seed'?' · dane startowe, liczę aktualne w tle':d.source=='mixed'?' · część kart z zrzutu, liczę resztę w tle':'')+' · godzina w strefie Warszawa';
  if(d.status=='computing') st+=' · liczę historię drużyn w tle…';
  if(e.length) st+=`<div class="err">Błąd źródła: ${esc(e.map(x=>x.join(': ')).join('; '))}</div>`;
  $('#st').innerHTML=st;

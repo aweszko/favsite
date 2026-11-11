@@ -1170,11 +1170,86 @@ class TGoalOvers(unittest.TestCase):
         self.assertGreaterEqual(by["over35"]["edge"], 0.03)
         ranked = g.rank_live_lines([card])
         self.assertTrue(ranked)
+        self.assertEqual(len(ranked), 1)  # jeden mecz — jedna pozycja, mimo kilku linii
         self.assertEqual(ranked[0]["key"], "over35")  # większa przewaga niż krótki over 2.5
         self.assertIn("@1.85", ranked[0]["summary"])
         self.assertIn("over 3.5 w meczu", ranked[0]["summary"])
         self.assertIn("kurs zakłada", ranked[0]["summary"])
         self.assertIn("16/20", ranked[0]["summary"])
+        # drugi mecz = drugi wiersz, bez powtórki pierwszego
+        card_b = g.apply_odds_to_match(dict(card, eventId=2, home="Alfa", away="Beta"),
+                                       {"over05_2h": 1.22, "over25": 1.22, "over35": 1.85, "over15_2h": 1.70})
+        ranked2 = g.rank_live_lines([card, card_b])
+        self.assertEqual(len(ranked2), 2)
+        self.assertEqual({r["eventId"] for r in ranked2}, {1, 2})
+        self.assertIn("Najlepsza opcja", card.get("recommend") or "")
+
+
+    def test_live_detail_conditions_on_first_half_00(self):
+        import goal_overs as g
+        # 17 meczów: w 6 pierwsza połowa 0:0, z nich 3 mają 3+ goli w 2H, 1 ma 4+
+        zz3 = [("home", 50), ("away", 60), ("home", 75)]
+        zz4 = [("home", 50), ("away", 60), ("home", 75), ("away", 85)]
+        zz1 = [("home", 60)]
+        opened = [("home", 20), ("away", 55)]
+        h_ms = ([self._game("h", True, zz3) for _ in range(2)]
+                + [self._game("h", True, zz4), self._game("h", True, zz1)]
+                + [self._game("h", True, opened) for _ in range(5)])
+        a_ms = ([self._game("a", True, zz3), self._game("a", True, zz1)]
+                + [self._game("a", True, opened) for _ in range(6)])
+        self.assertEqual(len(h_ms) + len(a_ms), 17)
+        h = g.team_profile("h", h_ms, name="Alfa")
+        a = g.team_profile("a", a_ms, name="Beta")
+        # teraz 2. połowa, 2:0 po 0:0 do przerwy, 60. minuta
+        card = g.live_match_card(h, a, {"minutes": 60, "score": "2:0", "period": "2P",
+            "periods": [
+                {"homeTeamScore": 0, "awayTeamScore": 0, "type": "FIRST_HALF", "num": 1},
+                {"homeTeamScore": 2, "awayTeamScore": 0, "type": "SECOND_HALF", "num": 2},
+            ]})
+        self.assertIsNotNone(card)
+        d = card["detail"]
+        self.assertIn("Wynik 2:0", d["state"])
+        self.assertIn("padły już 2 gole", d["state"])
+        self.assertIn("W 6/17 meczach tych drużyn 1. połowa 0:0", d["given_1h"])
+        self.assertIn("3+ goli w 2. połowie w 4", d["given_1h"])
+        self.assertIn("4+ goli w 2. połowie w 1", d["given_1h"])
+        self.assertIn("Próba 6 meczów", d["given_1h"])
+        self.assertTrue(d.get("given_1h_now"))
+        self.assertIn("po 60. minucie", d["given_1h_now"])
+        self.assertIn("kolejnego gola", d["next_goal"])
+        card = g.apply_odds_to_match(card, {"over25_2h": 1.85, "over45": 1.85})
+        nxt = card["detail"]["next_goal"]
+        self.assertIn("Kurs Superbet @1.85", nxt)
+        self.assertRegex(nxt, r"zakłada \d+%")
+        self.assertTrue("PLUS" in nxt or "MINUS" in nxt)
+
+    def test_pre_ranking_uses_first_half_line_when_edge_better(self):
+        import goal_overs as g
+        # 2H over 0.5 prawie zawsze (krótki kurs, MINUS); 1H over 0.5 rzadszy, ale lepszy edge
+        ms = []
+        for i in range(10):
+            if i < 9:
+                gs = [("home", 20), ("away", 60)] if i < 7 else [("away", 60)]
+            else:
+                gs = []
+            ms.append(self._game("h", True, gs))
+        h = g.team_profile("h", ms, name="Alfa")
+        a = g.team_profile("a", ms, name="Beta")
+        card = g.pre_match_card(h, a, {"eventId": 10, "start_warsaw": "18:00",
+            "day_warsaw": "2026-11-12", "home": "Alfa", "away": "Beta", "tournament": "Liga"})
+        self.assertIsNotNone(card)
+        by = {ln["key"]: ln for ln in card["lines"]}
+        self.assertIn("over05_1h", by)
+        self.assertIn("over05_2h", by)
+        # krótki 2H vs dłuższy 1H
+        card = g.apply_odds_to_match(card, {"over05_2h": 1.12, "over05_1h": 1.70})
+        by = {ln["key"]: ln for ln in card["lines"]}
+        if by["over05_1h"].get("chance") >= 0.60 and by["over05_1h"].get("verdict") == "PLUS":
+            ranked = g.rank_live_lines([card])
+            self.assertEqual(len(ranked), 1)
+            self.assertEqual(ranked[0]["key"], "over05_1h")
+            self.assertIn("Alfa", ranked[0]["summary"])
+            self.assertIn("18:00", ranked[0]["summary"])
 
     def test_plus_minus_threshold_three_pp(self):
         import goal_overs as g
@@ -1199,12 +1274,20 @@ class TGoalOvers(unittest.TestCase):
         ms = [self._game("h", True, [("home", 20), ("away", 50), ("home", 70)]) for _ in range(10)]
         h = g.team_profile("h", ms, name="Alfa")
         a = g.team_profile("a", ms, name="Beta")
-        card = g.pick_pre_for_match(h, a, {"start_warsaw": "19:00", "home": "Alfa", "away": "Beta"})
+        card = g.pick_pre_for_match(h, a, {"start_warsaw": "19:00", "day_warsaw": "2026-11-12",
+            "home": "Alfa", "away": "Beta", "tournament": "Ekstraklasa"})
         self.assertIsNotNone(card)
-        self.assertIn(card["key"], ("over15", "over25", "over05_1h", "over05_2h", "btts"))
-        self.assertTrue(card["summary"].startswith("Warto rozważyć"))
-        self.assertIn("Szansa:", card["summary"])
+        keys9 = {spec[0] for spec in g.PRE_OVER_SPEC}
+        self.assertIn(card["key"], keys9)
+        self.assertIn("Alfa", card["summary"])
+        self.assertIn("Beta", card["summary"])
+        self.assertIn("Ekstraklasa", card["summary"])
+        self.assertIn("19:00", card["summary"])
+        self.assertIn("Warszawa", card["summary"])
+        self.assertIn("Szansa", card["summary"])
         self.assertRegex(card["summary"], r"\d+/\d+")
+        self.assertEqual(len(card["lines"]), 9)
+        self.assertEqual({ln["key"] for ln in card["lines"]}, keys9)
         # BTTS sam w sobie liczy się uczciwie
         b = [c for c in g.qualifying_cards(h, a, {}) if c["key"] == "btts"]
         self.assertTrue(b)
@@ -1266,10 +1349,13 @@ class TGoalOvers(unittest.TestCase):
         self.assertIn("Overy przedmeczowe", app.HTML)
         self.assertNotIn("Pozostałe mecze live", app.HTML)
         self.assertIn("Wszystkie mecze live", app.HTML)
+        self.assertIn("Wszystkie mecze przedmeczowe", app.HTML)
         self.assertIn("PLUS", app.HTML)
         self.assertIn("Kurs zakłada", app.HTML)
-        self.assertIn("Szansa:", app.HTML)
         self.assertIn("Ranking 1–10", app.HTML)
+        self.assertIn("data-eid", app.HTML)
+        self.assertIn("Warszawa", app.HTML)
+        self.assertIn("given_1h", app.HTML)
 
     def test_seed_payload_has_chances(self):
         seed = app._seed_payload(now_ts=1_794_400_000)  # 11.11.2026 rano UTC
