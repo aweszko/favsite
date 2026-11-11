@@ -1724,11 +1724,11 @@ def _merge_picks(live_cards, processed_ids, seed_picks=None, live_1h=None, seed_
 
 def _rank_pre_unique(cards, require_odds=True):
     if require_odds:
-        rows = goal_overs.rank_live_lines(cards)
+        rows = goal_overs.rank_pre_lines(cards)
         if rows:
             return rows
-    # bez kursów (albo żaden PLUS/próg): jeden mecz raz, najlepsza linia wg szansy
-    return goal_overs.rank_unique_by_chance(cards)
+    # bez kursów (albo żaden nie ma kursu ≥ 1.30): jeden mecz raz, bez over 0.5 w meczu
+    return goal_overs.rank_unique_by_chance(cards, pre=True)
 
 
 def _publish_overs(cards, evs, today, tomorrow, skipped, processed_ids, partial, seed_picks=None, cards_1h=None, seed_1h=None):
@@ -1743,8 +1743,8 @@ def _publish_overs(cards, evs, today, tomorrow, skipped, processed_ids, partial,
             eid = p.get("eventId")
             if eid in ranked_ids or eid in processed_ids:
                 continue
-            if _seed_still_relevant(p):
-                extras.append(dict(p))
+            if _seed_still_relevant(p) and not goal_overs._is_match_over05(p):
+                extras.append(goal_overs.sanitize_team_names(dict(p)))
         extras.sort(key=lambda c: (-(c.get("chance") or 0), -(c.get("n") or 0)))
     room = max(0, goal_overs.MAX_PICKS - len(ranked))
     picks = [goal_overs.public_line_card(r) for r in ranked] + extras[:room]
@@ -1775,7 +1775,7 @@ def _publish_overs(cards, evs, today, tomorrow, skipped, processed_ids, partial,
                    "p_min": goal_overs.LIVE_RANK_P_MIN,
                    "edge_plus": goal_overs.EDGE_PLUS},
         "rule": goal_overs.CHANCE_RULE,
-        "note": "Każdy mecz raz. Ranking bierze pod uwagę over 0.5/1.5/2.5 w 1. połowie, 2. połowie i w meczu (szansa ≥ 60% i kurs, wg przewagi szansa − 1/kurs). PLUS, gdy model bije kurs o co najmniej 3 pp. Forma, nie gwarancja. Nic nie jest stawiane.",
+        "note": "Każdy mecz raz. Przed meczem typuję tylko linie z kursem Superbet ok. 1,30 albo wyższym — bardzo krótki kurs (np. over 0.5 w meczu po 1,05) pomijam. Szansa na wygraną zakładu jest przy każdym typie. Opłaca się, gdy szansa jest wyraźnie wyższa niż to, co sugeruje kurs. Forma, nie gwarancja. Nic nie jest stawiane.",
     }
     with LOCK:
         OVERS_STATE.update(res=res, t=time.time() if not partial else OVERS_STATE["t"] or time.time())
@@ -2157,7 +2157,7 @@ def _live_meta(ev):
                 tournament=ev.get("league"), category=ev.get("country"),
                 mode="live", minutes=ev.get("minutes"), score=ev.get("score"),
                 period=ev.get("period"), periods=ev.get("periods") or [],
-                br=ev.get("br"),
+                br=ev.get("br"), o1=ev.get("o1"), ox=ev.get("ox"), o2=ev.get("o2"),
                 start_pl=("%s %s" % (ev.get("day_warsaw") or "", ev.get("start_warsaw") or "")).strip())
 
 
@@ -2250,7 +2250,7 @@ def _publish_live_overs(evs, partial=False, fetch_odds=False):
                    "p_min": goal_overs.LIVE_RANK_P_MIN,
                    "edge_plus": goal_overs.EDGE_PLUS},
         "rule": goal_overs.CHANCE_RULE,
-        "note": "Tylko mecze LIVE. Szansa dotyczy goli w pozostałym czasie bieżącej połowy (1H: do przerwy; przerwa/2H: w 2. połowie) i linii over w połowie oraz — o przerwie i w 2H — analogicznego over w meczu. Ranking: każdy mecz tylko raz, pozycję wyznacza najlepsza linia (szansa ≥ 60% i kurs, wg przewagi szansa − 1/kurs). PLUS, gdy model bije kurs o co najmniej 3 pp. Mała próba to ostrzeżenie, nie ukrywanie. Forma, nie gwarancja. Nic nie jest stawiane.",
+        "note": "Tylko mecze na żywo. Szansa dotyczy goli w pozostałym czasie tej połowy. Każdy mecz raz. Przy typie zawsze widać szansę na wygraną zakładu, kurs i czy się opłaca. Forma, nie gwarancja. Nic nie jest stawiane.",
     }
     with LOCK:
         LIVE_OVERS_STATE.update(res=res, t=time.time())
