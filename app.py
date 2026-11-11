@@ -1739,11 +1739,15 @@ def _publish_overs(cards, evs, today, tomorrow, skipped, processed_ids, partial,
     ranked_ids = {r.get("eventId") for r in ranked}
     extras = []
     if partial:
-        for p in seed_picks or []:
-            eid = p.get("eventId")
-            if eid in ranked_ids or eid in processed_ids:
+        seen_ex = set()
+        for p in list(seed_1h or []) + list(seed_picks or []):
+            if not p:
                 continue
-            if _seed_still_relevant(p) and not goal_overs._is_match_over05(p):
+            eid = p.get("eventId")
+            if eid in ranked_ids or eid in processed_ids or eid in seen_ex:
+                continue
+            seen_ex.add(eid)
+            if _seed_still_relevant(p) and goal_overs._is_pre_1h_line(p):
                 extras.append(goal_overs.sanitize_team_names(dict(p)))
         extras.sort(key=lambda c: (-(c.get("chance") or 0), -(c.get("n") or 0)))
     room = max(0, goal_overs.MAX_PICKS - len(ranked))
@@ -1775,7 +1779,7 @@ def _publish_overs(cards, evs, today, tomorrow, skipped, processed_ids, partial,
                    "p_min": goal_overs.LIVE_RANK_P_MIN,
                    "edge_plus": goal_overs.EDGE_PLUS},
         "rule": goal_overs.CHANCE_RULE,
-        "note": "Każdy mecz raz. Przed meczem typuję tylko linie z kursem Superbet ok. 1,30 albo wyższym — bardzo krótki kurs (np. over 0.5 w meczu po 1,05) pomijam. Szansa na wygraną zakładu jest przy każdym typie. Opłaca się, gdy szansa jest wyraźnie wyższa niż to, co sugeruje kurs. Forma, nie gwarancja. Nic nie jest stawiane.",
+        "note": "Tylko gole w 1. połowie (over 0.5, 1.5 i 2.5). Każdy mecz raz. Typuję przy kursie Superbet ok. 1,30 albo wyższym. Szansa na wygraną zakładu jest przy każdym typie. Opłaca się, gdy szansa jest wyraźnie wyższa niż to, co sugeruje kurs. Forma, nie gwarancja. Nic nie jest stawiane.",
     }
     with LOCK:
         OVERS_STATE.update(res=res, t=time.time() if not partial else OVERS_STATE["t"] or time.time())

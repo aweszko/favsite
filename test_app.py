@@ -1242,8 +1242,10 @@ class TGoalOvers(unittest.TestCase):
         self.assertIsNotNone(card)
         by = {ln["key"]: ln for ln in card["lines"]}
         self.assertIn("over05_1h", by)
-        self.assertIn("over05_2h", by)
-        # krótki 2H vs dłuższy 1H
+        self.assertNotIn("over05_2h", by)
+        self.assertFalse(any(ln.get("scope") in ("2h", "match") for ln in card["lines"]))
+        self.assertEqual({ln["scope"] for ln in card["lines"]}, {"1h"})
+        # typuję tylko 1H; kurs 1.70 na over 0.5 w 1. połowie
         card = g.apply_odds_to_match(card, {"over05_2h": 1.12, "over05_1h": 1.70})
         by = {ln["key"]: ln for ln in card["lines"]}
         if by["over05_1h"].get("chance") >= 0.60 and by["over05_1h"].get("verdict") == "PLUS":
@@ -1281,8 +1283,8 @@ class TGoalOvers(unittest.TestCase):
         card = g.pick_pre_for_match(h, a, {"start_warsaw": "19:00", "day_warsaw": "2026-11-12",
             "home": "Alfa", "away": "Beta", "tournament": "Ekstraklasa"})
         self.assertIsNotNone(card)
-        keys9 = {spec[0] for spec in g.PRE_OVER_SPEC}
-        self.assertIn(card["key"], keys9)
+        keys1h = set(g.PRE_1H_KEYS)
+        self.assertIn(card["key"], keys1h)
         self.assertIn("Alfa", card["summary"])
         self.assertIn("Beta", card["summary"])
         self.assertIn("Ekstraklasa", card["summary"])
@@ -1290,8 +1292,9 @@ class TGoalOvers(unittest.TestCase):
         self.assertIn("Warszawa", card["summary"])
         self.assertIn("Szansa", card["summary"])
         self.assertRegex(card["summary"], r"\d+/\d+")
-        self.assertEqual(len(card["lines"]), 9)
-        self.assertEqual({ln["key"] for ln in card["lines"]}, keys9)
+        self.assertEqual(len(card["lines"]), 3)
+        self.assertEqual({ln["key"] for ln in card["lines"]}, keys1h)
+        self.assertFalse(any(ln.get("scope") in ("2h", "match") for ln in card["lines"]))
         # BTTS sam w sobie liczy się uczciwie
         b = [c for c in g.qualifying_cards(h, a, {}) if c["key"] == "btts"]
         self.assertTrue(b)
@@ -1366,6 +1369,8 @@ class TGoalOvers(unittest.TestCase):
         self.assertIn("Warszawa", app.HTML)
         self.assertIn("given_1h", app.HTML)
         self.assertIn("similar", app.HTML)
+        self.assertIn("tylko 1. połowa", app.HTML)
+        self.assertIn("Nie typuję tu 2. połowy", app.HTML)
 
 
     def test_pre_rank_keeps_team_names_not_side_fractions(self):
@@ -1383,27 +1388,36 @@ class TGoalOvers(unittest.TestCase):
         self.assertIsInstance(ranked[0]["away"], str)
         pub = g.public_line_card(ranked[0])
         self.assertEqual(pub["home"], "Alfa")
-        self.assertNotIn(pub["key"], ("over05",))  # nie typujemy over 0.5 w meczu bez kursu
+        self.assertIn(pub["key"], g.PRE_1H_KEYS)
         self.assertIn("1. połowie", pub.get("play") or "")
+        self.assertNotIn("2. połowie", pub.get("play") or "")
 
     def test_pre_ranking_skips_short_match_over05_odds(self):
         import goal_overs as g
-        ms = [self._game("h", True, [("home", 20), ("away", 50), ("home", 70)]) for _ in range(10)]
+        # 9/10 meczów z 2+ golami w 1H — obie linie 0.5 i 1.5 mają wysoką szansę
+        ms = []
+        for i in range(10):
+            if i < 9:
+                gs = [("home", 20), ("away", 35), ("home", 70)]
+            else:
+                gs = [("home", 20), ("home", 70)]
+            ms.append(self._game("h", True, gs))
         h = g.team_profile("h", ms, name="Alfa")
         a = g.team_profile("a", ms, name="Beta")
         card = g.pre_match_card(h, a, {"eventId": 88, "home": "Alfa", "away": "Beta",
             "start_warsaw": "20:00", "day_warsaw": "2026-11-12", "tournament": "Liga"})
-        # krótki over 0.5 w meczu i dłuższy 1H
-        card = g.apply_odds_to_match(card, {"over05": 1.05, "over05_1h": 1.70, "over15": 1.40, "over05_2h": 1.12})
+        self.assertNotIn("over05", {ln["key"] for ln in card["lines"]})
+        self.assertNotIn("over05_2h", {ln["key"] for ln in card["lines"]})
+        # krótki over 0.5 w 1H (poniżej 1.30) vs dłuższy over 1.5 w 1H
+        card = g.apply_odds_to_match(card, {"over05": 1.05, "over05_1h": 1.20, "over15_1h": 1.70, "over05_2h": 1.12})
         by = {ln["key"]: ln for ln in card["lines"]}
-        self.assertEqual(by["over05"]["verdict"], "MINUS")  # ~95% vs kurs 1.05 to i tak krótki typ
+        self.assertLess(by["over05_1h"]["odds"], 1.30)
         ranked = g.rank_pre_lines([card])
         self.assertEqual(len(ranked), 1)
-        self.assertNotEqual(ranked[0]["key"], "over05")
+        self.assertEqual(ranked[0]["key"], "over15_1h")
         self.assertGreaterEqual(ranked[0]["odds"], 1.30 - 1e-9)
         self.assertEqual(ranked[0]["home"], "Alfa")
-        # 1.12 na 2H 0.5 też poniżej progu
-        self.assertNotEqual(ranked[0]["key"], "over05_2h")
+        self.assertNotIn(ranked[0]["key"], ("over05", "over05_2h", "over15", "over05_1h"))
 
     def test_similar_situation_relaxes_when_few(self):
         import goal_overs as g

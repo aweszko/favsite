@@ -135,7 +135,7 @@ input:focus,button:focus-visible{outline:2px solid var(--g);outline-offset:1px}.
 <div id="worst" hidden><div class="vnote">Dziurawe obrony · tylko mecze LIVE · temperatura obrony z ost. 5 meczów (5/5) z korektą siły rywala · <b>forma, nie gwarancja</b></div><div id="wp"></div></div>
 <div id="next" hidden><div class="vnote">Następny gol · twarde sita na top 3 · rywal dziurawej strzeli <b>następnego</b> gola · forma + presja teraz, nie gwarancja · brak kolejnego gola = pudło</div><div id="np"></div></div>
 <div id="overs-live" hidden><div class="vnote">Overy LIVE · każdy mecz raz · kliknij mecz, żeby zobaczyć szczegóły · co zagrać, szansa na wygraną, kurs, czy się opłaca · odświeżanie co ok. 60 s · <b>forma, nie gwarancja</b></div><div id="opl"></div></div>
-<div id="overs-pre" hidden><div class="vnote">Overy przedmeczowe · każdy mecz raz · nazwy, liga, godzina (Warszawa) · typuję linie z kursem ok. 1,30 albo wyższym · kliknij, żeby zobaczyć 1. połowę, 2. połowę i mecz · <b>forma, nie gwarancja</b></div><div id="opp"></div></div>
+<div id="overs-pre" hidden><div class="vnote">Overy przedmeczowe · tylko 1. połowa (over 0.5, 1.5, 2.5) · każdy mecz raz · nazwy, liga, godzina (Warszawa) · typuję przy kursie ok. 1,30 albo wyższym · <b>forma, nie gwarancja</b></div><div id="opp"></div></div>
 <footer>Źródła: Superbet PL (oferta, kursy 1X2), Sportradar (statystyki strzałów). Godziny: Europe/Warsaw. Brak danych = „brak danych”, nic nie jest szacowane.</footer>
 <script>
 const $=s=>document.querySelector(s);let view='list',tab='live',rmode='all',M=null,R=null,open={};
@@ -431,7 +431,7 @@ function oversPreDetail(m){
  const lg=m.tournament||m.category||'';
  return '<div class="oc-detail">'
   +'<div class="row"><b>'+esc(matchTitle(m))+'</b>'+(lg?' · '+esc(lg):'')+(when?' · '+esc(when):'')+'</div>'
-  +'<div class="row">Szansa na wygraną zakładu dla over 0.5, 1.5 i 2.5 osobno w 1. połowie, 2. połowie i w meczu, z historii obu drużyn.</div>'
+  +'<div class="row">Szansa na wygraną zakładu dla over 0.5, 1.5 i 2.5 w 1. połowie, z historii obu drużyn. Nie typuję tu 2. połowy ani całego meczu.</div>'
   +(d.offer?('<div class="row">'+esc(d.offer)+'</div>'):'')
   +linesTable(m)
   +(rec && rec!==d.offer?'<div class="rec">'+esc(rec)+'</div>':'')
@@ -471,7 +471,7 @@ function drawOversInto(d, mount, live){
  const kind=live?'live':'pre';
  const openId=live?OL_OPEN:OP_OPEN;
  let h='<div class="nf"><h3>Ranking 1–10</h3></div>';
- if(!P.length)h+='<div class="empty">'+(live?'Teraz żadna linia nie ma jednocześnie szansy ≥ 60% i kursu Superbet. Kliknij mecz niżej, żeby zobaczyć szczegóły.':'Brak typów z szansą ≥ 60%. Kliknij mecz niżej, żeby zobaczyć linie 1. połowy, 2. połowy i meczu.')+'</div>';
+ if(!P.length)h+='<div class="empty">'+(live?'Teraz żadna linia nie ma jednocześnie szansy ≥ 60% i kursu Superbet. Kliknij mecz niżej, żeby zobaczyć szczegóły.':'Brak typów na 1. połowę z szansą ≥ 60% i kursem ok. 1,30 albo wyższym. Kliknij mecz niżej, żeby zobaczyć over 0.5, 1.5 i 2.5 w 1. połowie.')+'</div>';
  else h+=P.map(c=>oversRankRow(c,kind,openId,M)).join('');
  if(M.length){
   h+='<div class="nf" style="margin-top:18px"><h3>'+(live?'Wszystkie mecze live':'Wszystkie mecze przedmeczowe')+'</h3></div>';

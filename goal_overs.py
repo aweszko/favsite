@@ -865,17 +865,13 @@ def pick_1h_for_match(home, away, meta=None, p_min=P_MIN, min_n=MIN_N):
 
 PRE_KEYS = ("over15", "over25", "over05_1h", "over05_2h", "btts")
 
+# Zakładka przedmeczowa: WYŁĄCZNIE over w 1. połowie (0.5 / 1.5 / 2.5).
 PRE_OVER_SPEC = (
     ("over05_1h", "1h", 0.5, "tot_1h", "Over 0.5 gola w 1. połowie", "Gol w 1. połowie padł"),
     ("over15_1h", "1h", 1.5, "tot_1h", "Over 1.5 gola w 1. połowie", "2+ gole w 1. połowie padły"),
     ("over25_1h", "1h", 2.5, "tot_1h", "Over 2.5 gola w 1. połowie", "3+ gole w 1. połowie padły"),
-    ("over05_2h", "2h", 0.5, "tot_2h", "Over 0.5 gola w 2. połowie", "Gol w 2. połowie padł"),
-    ("over15_2h", "2h", 1.5, "tot_2h", "Over 1.5 gola w 2. połowie", "2+ gole w 2. połowie padły"),
-    ("over25_2h", "2h", 2.5, "tot_2h", "Over 2.5 gola w 2. połowie", "3+ gole w 2. połowie padły"),
-    ("over05", "match", 0.5, "tot", "Over 0.5 w meczu", "Gol w meczu padł"),
-    ("over15", "match", 1.5, "tot", "Over 1.5 w meczu", "2+ gole w meczu padły"),
-    ("over25", "match", 2.5, "tot", "Over 2.5 w meczu", "3+ gole w meczu padły"),
 )
+PRE_1H_KEYS = tuple(s[0] for s in PRE_OVER_SPEC)
 
 
 def _thresh_sample(matches, field, line):
@@ -888,7 +884,7 @@ def _thresh_sample(matches, field, line):
 
 
 def pre_over_lines(home, away):
-    """Over 0.5 / 1.5 / 2.5 w 1H, 2H i w meczu, z ułamkiem łącznym i osobno na drużynę."""
+    """Tylko over 0.5 / 1.5 / 2.5 w 1. połowie, z ułamkiem łącznym i osobno na drużynę."""
     lines = []
     for key, scope, line, field, play, why_verb in PRE_OVER_SPEC:
         kh, nh, lamh = _thresh_sample(home.get("matches") or [], field, line)
@@ -1022,7 +1018,7 @@ def pre_summary(card):
 
 
 def pre_match_card(home, away, meta=None):
-    """Mecz przedmeczowy: 9 linii over 0.5/1.5/2.5 × 1H/2H/mecz."""
+    """Mecz przedmeczowy: tylko over 0.5 / 1.5 / 2.5 w 1. połowie."""
     meta = meta or {}
     lines = pre_over_lines(home, away)
     if not lines:
@@ -2047,7 +2043,21 @@ def sanitize_team_names(row, src=None):
     return row
 
 
+def _is_pre_1h_line(ln):
+    """Czy typ należy do zakładki przedmeczowej (tylko 1. połowa)."""
+    if not ln:
+        return False
+    if ln.get("scope") == "1h":
+        return True
+    key = str(ln.get("key") or "")
+    if key in PRE_1H_KEYS or key.endswith("_1h"):
+        return True
+    play = (ln.get("play") or "").lower()
+    return "1. połowie" in play and "over" in play
+
+
 def _is_match_over05(ln):
+    """Krótki over 0.5 w całym meczu — nie typujemy go przed meczem."""
     if not ln:
         return False
     try:
@@ -2061,22 +2071,19 @@ def _is_match_over05(ln):
 
 
 def _pre_group(ln):
-    """Kolejność typów przed meczem, gdy nie ma kursu: 1H, potem 2H, na końcu over w meczu (bez 0.5)."""
-    scope = ln.get("scope")
+    """Kolejność typów przed meczem bez kursu: najpierw over 0.5, potem 1.5, potem 2.5 w 1. połowie."""
+    if not _is_pre_1h_line(ln):
+        return 9
     try:
         line = float(ln.get("line") or 0)
     except (TypeError, ValueError):
         line = 0
-    if scope == "1h" and abs(line - 0.5) < 1e-9:
+    if abs(line - 0.5) < 1e-9:
         return 0
-    if scope == "1h" and abs(line - 1.5) < 1e-9:
+    if abs(line - 1.5) < 1e-9:
         return 1
-    if scope == "1h" and abs(line - 2.5) < 1e-9:
+    if abs(line - 2.5) < 1e-9:
         return 2
-    if scope == "2h":
-        return 3
-    if scope == "match" and line >= 1.5 - 1e-9:
-        return 4
     return 9
 
 
@@ -2119,7 +2126,7 @@ def best_rank_line(m, p_min=LIVE_RANK_P_MIN, min_odds=None):
 
 
 def best_pre_line_no_odds(m, p_min=LIVE_RANK_P_MIN):
-    """Gdy nie ma kursu: bez over 0.5 w meczu; najpierw 1. połowa, potem 2. połowa, potem wyższe over w meczu."""
+    """Gdy nie ma kursu: tylko linie 1. połowy (0.5, potem 1.5, potem 2.5)."""
     cands = []
     for ln in (m.get("lines") or []):
         if ln.get("chance") is None or ln["chance"] < p_min:
@@ -2167,8 +2174,17 @@ def rank_live_lines(matches, limit=MAX_PICKS, p_min=LIVE_RANK_P_MIN, min_odds=No
 
 
 def rank_pre_lines(matches, limit=MAX_PICKS, p_min=LIVE_RANK_P_MIN, min_odds=PRE_MIN_ODDS):
-    """Przed meczem: tylko linie z kursem Superbet ≥ ok. 1.30, każdy mecz raz, wg przewagi."""
-    return rank_live_lines(matches, limit=limit, p_min=p_min, min_odds=min_odds)
+    """Przed meczem: tylko over w 1. połowie, z kursem Superbet ≥ ok. 1.30, każdy mecz raz."""
+    narrowed = []
+    for m in matches or []:
+        if not m:
+            continue
+        mm = dict(m)
+        mm["lines"] = [ln for ln in (m.get("lines") or []) if _is_pre_1h_line(ln)]
+        if not mm["lines"]:
+            continue
+        narrowed.append(mm)
+    return rank_live_lines(narrowed, limit=limit, p_min=p_min, min_odds=min_odds)
 
 
 def rank_unique_by_chance(matches, limit=MAX_PICKS, p_min=LIVE_RANK_P_MIN, pre=False):
@@ -2276,7 +2292,7 @@ CHANCE_RULE = (
     "Szansa na wygraną zakładu to ta częstość, lekko poprawiona prostym rachunkiem, ile goli zwykle pada w takim czasie. "
     "Gdy jest kurs Superbet, porównuję szansę z tym, co sugeruje kurs. "
     "Opłaca się, gdy nasza szansa jest wyraźnie wyższa (o co najmniej 3 na 100). "
-    "Przed meczem typuję tylko linie z kursem ok. 1,30 albo wyższym — bardzo krótki kurs (np. over 0.5 w meczu po 1,05) pomijam. "
+    "Przed meczem typuję tylko gole w 1. połowie (over 0.5, 1.5 i 2.5) i tylko przy kursie ok. 1,30 albo wyższym. "
     "Mało meczów? Piszę to wprost i i tak pokazuję mecz. To częstość z historii, nie pewność że tak będzie."
 )
 
