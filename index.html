@@ -93,6 +93,8 @@ input:focus,button:focus-visible{outline:2px solid var(--g);outline-offset:1px}.
 @keyframes shm{to{background-position:-200% 0}}.pg{height:6px;border-radius:4px;background:#222;overflow:hidden;margin:12px 0 6px}.pg i{display:block;height:100%;background:var(--gg);transition:width .5s}
 .lg2{display:flex;gap:10px;font-size:11px;color:var(--s);margin:2px 0}.lg2 i{display:inline-block;width:9px;height:9px;border-radius:2px;margin-right:3px;vertical-align:-1px}
 .nf{margin:10px 0 16px;padding:12px;border:1px solid #2f2710;border-radius:14px;background:#14110a}.nf h3{margin:0 0 8px;font-size:13px;color:var(--g3)}.nf ol{margin:0;padding-left:18px;font-size:12px;color:var(--s)}.nf li{margin:3px 0}.nf b{color:var(--g3)}.nc{border:1px solid #3a3014;border-radius:16px;padding:14px;margin:0 0 12px;background:linear-gradient(180deg,#1a150c,#120e08)}.nc.hot{border-color:#c9a227;box-shadow:0 0 0 1px #c9a22744}.nc .tip{font-size:16px;font-weight:800;color:var(--g3);margin:6px 0 10px}.nc .meta{font-size:12px;color:var(--s);display:flex;flex-wrap:wrap;gap:8px}.nc .kv{display:grid;grid-template-columns:repeat(auto-fit,minmax(90px,1fr));gap:8px;margin-top:10px}.nc .kv b{display:block;font-size:16px;color:var(--g)}.nc .kv small{color:var(--s)}
+.oc-rank{border:1px solid #3a3014;border-radius:12px;padding:10px 14px;margin:0 12px 8px;background:#120e08;line-height:1.45;font-size:14px}
+.oc-rank b{color:var(--g)}
 .oc{border:1px solid #3a3014;border-radius:16px;padding:14px;margin:0 12px 12px;background:linear-gradient(180deg,#1a150c,#120e08)}
 .oc.hot{border-color:#c9a227;box-shadow:0 0 0 1px #c9a22744}
 .oc .oh{display:flex;justify-content:space-between;align-items:flex-start;gap:10px}
@@ -117,7 +119,7 @@ input:focus,button:focus-visible{outline:2px solid var(--g);outline-offset:1px}.
 <div id="pro" hidden><div class="vnote">Pewniaki PRO · Etap 1: lista obserwowanych (kryteria ost. 5) · Etap 2: typ dopiero LIVE przy pełnej dominacji i presji w ost. 10 min · <b>Typy to spełnione kryteria, nie gwarancja</b></div><div id="pp"></div></div>
 <div id="worst" hidden><div class="vnote">Dziurawe obrony · tylko mecze LIVE · temperatura obrony z ost. 5 meczów (5/5) z korektą siły rywala · <b>forma, nie gwarancja</b></div><div id="wp"></div></div>
 <div id="next" hidden><div class="vnote">Następny gol · twarde sita na top 3 · rywal dziurawej strzeli <b>następnego</b> gola · forma + presja teraz, nie gwarancja · brak kolejnego gola = pudło</div><div id="np"></div></div>
-<div id="overs" hidden><div class="vnote">Overy goli · najpewniejsze schematy z minut goli (ost. 10–15 meczów) · szansa = częstość Laplace + Poisson · <b>forma, nie gwarancja</b></div><div id="op"></div></div>
+<div id="overs" hidden><div class="vnote">Overy goli · 1. i 2. połowa, ewentualnie gol po 75. min · na mecz jeden najmocniejszy typ · szansa = częstość Laplace + Poisson, dla 1. połowy też od minuty przy 0:0 · <b>forma, nie gwarancja</b></div><div id="op"></div></div>
 <footer>Źródła: Superbet PL (oferta, kursy 1X2), Sportradar (statystyki strzałów). Godziny: Europe/Warsaw. Brak danych = „brak danych”, nic nie jest szacowane.</footer>
 <script>
 const $=s=>document.querySelector(s);let view='list',tab='live',rmode='all',M=null,R=null,open={};
@@ -317,21 +319,43 @@ let O=null,ot=null;
 function drawOvers(){if(!O)return;
 if(O.status=='computing'&&!(O.picks&&O.picks.length)){const p=O.progress||{};$('#op').innerHTML='<div class="empty">Liczą się overy w tle… ('+(p.done||0)+'/'+(p.total||'?')+'). Pierwsze liczenie może potrwać kilka minut — strona nie blokuje się.</div>';return}
 const P=O.picks||[];
+const P1=O.picks_1h||[];
 const pf=x=>x==null?'–':(Math.round(100*x)+'%').replace(' ','');
+function whenOf(c){return (c.day_warsaw?c.day_warsaw.slice(5)+' ':'')+(c.start_warsaw||'');}
 function card(c){
  const warn=(c.warnings&&c.warnings.length)?'<div class="warn">⚠ '+c.warnings.map(esc).join(' · ')+'</div>':'';
  const emp=c.p_emp==null?'–':Math.round(100*c.p_emp)+'%';
  const poi=c.p_pois==null?'–':Math.round(100*c.p_pois)+'%';
- const when=(c.day_warsaw?esc(c.day_warsaw.slice(5))+' ':'')+esc(c.start_warsaw||'');
+ const when=esc(whenOf(c));
  const lg=[c.category,c.tournament].filter(Boolean).join(' · ');
+ const min20=(c.key==='over05_1h'&&c.chance_min20_pct!=null)?`<div class="row"><b>1. połowa od minuty:</b> na start ok. ${c.chance_kickoff_pct??c.chance_pct}%; w 20. minucie przy 0:0 ok. ${c.chance_min20_pct}% (${esc(c.frac_min20||'–')})</div>`:'';
  return `<div class="oc${c.rank<=3?' hot':''}"><div class="oh"><div class="mt">${when}${lg?' · '+esc(lg):''}<br><b>${esc(c.home||c.home_name||'')} – ${esc(c.away||c.away_name||'')}</b></div><div class="chp">${c.chance_pct??'–'}%<small>Szansa: ok. ${c.chance_pct??'–'}%</small></div></div>
 <div class="play">Co zagrać: ${esc(c.play)}</div>
 <div class="row"><b>Kiedy wejść:</b> ${esc(c.enter)}</div>
 <div class="row"><b>Dlaczego:</b> ${esc(c.why)}.</div>
 <div class="row"><b>Szansa:</b> ok. ${c.chance_pct??'–'}% · ułamek ${esc(c.frac||'–')} · częstość wygładzona ${emp} · Poisson ${poi}${c.conditional?' · szansa warunkowa':''}</div>
-${warn}</div>`}
-let h='<div class="nf"><h3>Najpewniejsze overy dnia</h3></div>';
-h+=P.length?P.map(card).join(''):'<div class="empty">Brak wystarczająco mocnych schematów (min. 8 meczów i szansa ≥ 70%).</div>';
+${min20}${warn}</div>`}
+function rankLine(c){
+ const who=(whenOf(c)?whenOf(c)+' ':'')+(c.home||c.home_name||'')+' – '+(c.away||c.away_name||'')+'. ';
+ const sum=c.summary||('Zagraj '+(c.play||'')+'. '+(c.why||'')+'. Szansa: ok. '+(c.chance_pct??'–')+'%. Kiedy wejść: '+(c.enter||'')+'.');
+ const extra=(c.key==='over05_1h'&&c.chance_min20_pct!=null&&!(sum.includes('20. minucie')))?(' Szansa na start ok. '+(c.chance_kickoff_pct??c.chance_pct)+'%; w 20. minucie przy 0:0 ok. '+c.chance_min20_pct+'% ('+(c.frac_min20||'–')+').'):'';
+ return '<div class="oc-rank"><b>#'+c.rank+'.</b> '+esc(who+sum+extra)+'</div>';
+}
+let h='<div class="nf"><h3>Ranking 1–10</h3></div>';
+if(!P.length)h+='<div class="empty">Brak wystarczająco mocnych schematów (min. 8 meczów i szansa ≥ 70%).</div>';
+else h+=P.map(rankLine).join('');
+if(P1.length){
+ h+='<div class="nf" style="margin-top:18px"><h3>Ranking 1. połowy</h3></div>';
+ h+=P1.map(rankLine).join('');
+}
+if(P.length){
+ h+='<div class="nf" style="margin-top:18px"><h3>Najpewniejsze overy dnia — karty</h3></div>';
+ h+=P.map(card).join('');
+}
+if(P1.length){
+ h+='<div class="nf" style="margin-top:18px"><h3>Karty 1. połowy</h3></div>';
+ h+=P1.map(card).join('');
+}
 h+=`<div class="hfoot">${esc(O.note||'')}<br>Sprawdzonych meczów: ${(O.footer&&O.footer.matches)||0} · za słabe: ${(O.footer&&O.footer.too_weak)||0} · bez danych: ${(O.footer&&O.footer.without_stats)||0}<details style="margin-top:6px;text-align:left"><summary>Jak liczona jest szansa</summary>${esc(O.rule||'')}</details></div>`;
 $('#op').innerHTML=h;
 const e=Object.entries(O.errors||{});

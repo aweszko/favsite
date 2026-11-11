@@ -1608,6 +1608,8 @@ def team_goal_views(uid, exclude_br=None, history=None):
                 mv["scored_2h"] = mv["gf_2h"] >= 1
                 mv["ht_00"] = mv["tot_1h"] == 0
                 mv["ht_le1"] = mv["tot_1h"] <= 1
+                mv["any_1h"] = mv["tot_1h"] >= 1
+                mv["first_1h_known"] = bool(mv.get("timeline_ok")) or mv["tot_1h"] == 0
             ms.append(mv)
         return ms
     return cached("gviews:%s:%s:%s" % (uid, exclude_br or "", n_hist), TEAM_TTL, f)
@@ -1653,12 +1655,15 @@ def _seed_payload(now_ts=None):
     except Exception:
         return None
     picks = [p for p in (raw.get("picks") or []) if _seed_still_relevant(p, now_ts)]
-    if not picks:
+    picks_1h = [p for p in (raw.get("picks_1h") or []) if _seed_still_relevant(p, now_ts)]
+    if not picks and not picks_1h:
         return None
     for i, p in enumerate(picks, 1):
         p["rank"] = i
+    for i, p in enumerate(picks_1h, 1):
+        p["rank"] = i
     out = dict(raw)
-    out.update(picks=picks, n_picks=len(picks), source="seed")
+    out.update(picks=picks, n_picks=len(picks), picks_1h=picks_1h, n_picks_1h=len(picks_1h), source="seed")
     return out
 
 
@@ -1676,7 +1681,7 @@ def _ensure_seed():
     return seed
 
 
-def _merge_picks(live_cards, processed_ids, seed_picks=None):
+def _merge_list(live_cards, processed_ids, seed_picks=None):
     live = [goal_overs.public_card(c) for c in goal_overs.rank_picks(live_cards, limit=goal_overs.MAX_PICKS)]
     live_ids = {p.get("eventId") for p in live}
     extra = []
@@ -1691,10 +1696,10 @@ def _merge_picks(live_cards, processed_ids, seed_picks=None):
     combined = live + extra[:room]
     for i, p in enumerate(combined, 1):
         p["rank"] = i
-    source = "live" if not extra[:room] and live else ("mixed" if live and extra[:room] else ("seed" if not live else "live"))
-    if live and not extra[:room]:
+    used_extra = extra[:room]
+    if live and not used_extra:
         source = "live"
-    elif live and extra[:room]:
+    elif live and used_extra:
         source = "mixed"
     elif live:
         source = "live"
@@ -1703,13 +1708,26 @@ def _merge_picks(live_cards, processed_ids, seed_picks=None):
     return combined, source
 
 
-def _publish_overs(cards, evs, today, tomorrow, skipped, processed_ids, partial, seed_picks=None):
-    picks, source = _merge_picks(cards, processed_ids, seed_picks)
+def _merge_picks(live_cards, processed_ids, seed_picks=None, live_1h=None, seed_1h=None):
+    picks, source = _merge_list(live_cards, processed_ids, seed_picks)
+    picks_1h, source_1h = _merge_list(live_1h or [], processed_ids, seed_1h)
+    if source == "live" and source_1h == "mixed":
+        source = "mixed"
+    elif source == "seed" and source_1h == "mixed":
+        source = "mixed"
+    elif source == "seed" and source_1h == "live" and picks:
+        source = "mixed"
+    return picks, picks_1h, source
+
+
+def _publish_overs(cards, evs, today, tomorrow, skipped, processed_ids, partial, seed_picks=None, cards_1h=None, seed_1h=None):
+    picks, picks_1h, source = _merge_picks(cards, processed_ids, seed_picks, live_1h=cards_1h, seed_1h=seed_1h)
     now = datetime.now(timezone.utc)
     res = {
         "generated_warsaw": to_warsaw(now).strftime("%Y-%m-%d %H:%M:%S"),
         "today_warsaw": today, "tomorrow_warsaw": tomorrow,
         "picks": picks, "n_picks": len(picks),
+        "picks_1h": picks_1h, "n_picks_1h": len(picks_1h),
         "source": source, "partial": partial,
         "footer": {"matches": len(evs), "checked": len(processed_ids),
                    "without_stats": skipped.get("nostats", 0),
@@ -1729,15 +1747,15 @@ def _overs_one(ev):
     try:
         mi = match_info(ev["br"])
         if not mi:
-            return ev, "nostats", None
+            return ev, "nostats", None, None
         hu = (mi.get("home") or {}).get("uid")
         au = (mi.get("away") or {}).get("uid")
         if not hu or not au:
-            return ev, "nostats", None
+            return ev, "nostats", None, None
         hv = team_goal_views(hu, ev.get("br"))
         av = team_goal_views(au, ev.get("br"))
         if not hv or not av:
-            return ev, "nostats", None
+            return ev, "nostats", None, None
         hp = goal_overs.team_profile(str(hu), hv, name=ev.get("home") or (mi["home"] or {}).get("name"))
         ap = goal_overs.team_profile(str(au), av, name=ev.get("away") or (mi["away"] or {}).get("name"))
         meta = dict(eventId=ev.get("eventId"), start_warsaw=ev.get("start_warsaw"),
@@ -1750,32 +1768,37 @@ def _overs_one(ev):
                     score=ev.get("score"), br=ev.get("br"),
                     start_pl=("%s %s" % (ev.get("day_warsaw") or "", ev.get("start_warsaw") or "")).strip())
         card = goal_overs.pick_for_match(hp, ap, meta)
-        return ev, "ok", card
+        card_1h = goal_overs.pick_1h_for_match(hp, ap, meta)
+        return ev, "ok", card, card_1h
     except Exception as ex:
         ERRORS["overy"] = "%s: %s" % (type(ex).__name__, ex)
-        return ev, "nostats", None
+        return ev, "nostats", None, None
 
 
-def build_overs(progress=None, job=None, seed_picks=None):
+def build_overs(progress=None, job=None, seed_picks=None, seed_1h=None):
     evs, today, tomorrow = _overs_window()
     if progress is not None:
         progress.update(done=0, total=len(evs))
-    cards, skipped, processed = [], {"nobr": 0, "nostats": 0, "thin": 0}, set()
+    cards, cards_1h, skipped, processed = [], [], {"nobr": 0, "nostats": 0, "thin": 0}, set()
 
-    def touch(ev, st, card):
+    def touch(ev, st, card, card_1h=None):
         processed.add(ev.get("eventId"))
         if st != "ok":
             skipped[st] = skipped.get(st, 0) + 1
-        elif card:
-            cards.append(card)
         else:
-            skipped["thin"] += 1
+            if card:
+                cards.append(card)
+            else:
+                skipped["thin"] += 1
+            if card_1h:
+                cards_1h.append(card_1h)
         if progress is not None:
             with LOCK:
                 progress["done"] = len(processed)
                 if job is not None:
                     job["beat"] = time.time()
-        _publish_overs(cards, evs, today, tomorrow, skipped, processed, partial=True, seed_picks=seed_picks)
+        _publish_overs(cards, evs, today, tomorrow, skipped, processed, partial=True,
+                       seed_picks=seed_picks, cards_1h=cards_1h, seed_1h=seed_1h)
 
     if evs:
         with ThreadPoolExecutor(OVERS_WORKERS) as pool:
@@ -1783,19 +1806,25 @@ def build_overs(progress=None, job=None, seed_picks=None):
             for fut in as_completed(futs):
                 if job and job.get("cancel"):
                     break
-                ev, st, card = fut.result()
-                touch(ev, st, card)
-    return _publish_overs(cards, evs, today, tomorrow, skipped, processed, partial=False, seed_picks=None)
+                ev, st, card, *rest = fut.result()
+                card_1h = rest[0] if rest else None
+                touch(ev, st, card, card_1h)
+    return _publish_overs(cards, evs, today, tomorrow, skipped, processed, partial=False,
+                          seed_picks=None, cards_1h=cards_1h, seed_1h=None)
 
 
 def _overs_worker(job):
     prog = job["progress"]
     try:
-        seed = (OVERS_STATE.get("res") or {}).get("picks") if (OVERS_STATE.get("res") or {}).get("source") in ("seed", "mixed") else None
-        if seed is None:
+        cur = OVERS_STATE.get("res") or {}
+        use_seed = cur.get("source") in ("seed", "mixed")
+        seed = cur.get("picks") if use_seed else None
+        seed_1h = cur.get("picks_1h") if use_seed else None
+        if seed is None and seed_1h is None:
             s = _seed_payload()
             seed = (s or {}).get("picks")
-        build_overs(prog, job=job, seed_picks=seed)
+            seed_1h = (s or {}).get("picks_1h")
+        build_overs(prog, job=job, seed_picks=seed, seed_1h=seed_1h)
         with LOCK:
             ERRORS.pop("overy_job", None)
     except Exception as e:

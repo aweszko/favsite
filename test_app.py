@@ -932,8 +932,8 @@ class TGoalOvers(unittest.TestCase):
         h = g.team_profile("h", ms, name="A")
         a = g.team_profile("a", ms, name="B")
         self.assertIsNone(g.pick_for_match(h, a, {}))
-        # duża próba, ale rzadki gol w 2H
-        ms2 = [self._game("h", True, [("home", 10)]) for _ in range(12)]  # tylko 1H
+        # duża próba, ale bez goli w 1H i 2H — żaden over nie jest mocny
+        ms2 = [self._game("h", True, []) for _ in range(12)]
         h2 = g.team_profile("h", ms2, name="A")
         a2 = g.team_profile("a", ms2, name="B")
         self.assertIsNone(g.pick_for_match(h2, a2, {}))
@@ -947,12 +947,108 @@ class TGoalOvers(unittest.TestCase):
         self.assertEqual(r[0]["chance"], 0.88)
         self.assertEqual(r[0]["rank"], 1)
 
+    def test_over05_1h_preferred_when_stronger(self):
+        import goal_overs as g
+        # obie drużyny: gol w 1H w 10/10 (minuta 12), brak gola w 2H
+        def pack(uid):
+            ms = [self._game(uid, True, [("home", 12)]) for _ in range(10)]
+            return g.team_profile(uid, ms, name="A" if uid=="h" else "B")
+        h, a = pack("h"), pack("a")
+        h["name"], a["name"] = "Alfa", "Beta"
+        card = g.pick_for_match(h, a, {"start_warsaw":"19:00","home":"Alfa","away":"Beta","ts":1})
+        self.assertIsNotNone(card)
+        self.assertEqual(card["key"], "over05_1h")
+        self.assertEqual(card["frac"], "20/20")
+        self.assertGreaterEqual(card["chance"], 0.70)
+        self.assertIn("1. połowie", card["play"])
+        self.assertIn("Szansa:", card["summary"])
+        self.assertIn("Zagraj", card["summary"])
+        self.assertIn("Kiedy wejść:", card["summary"])
+
+    def test_pick_1h_even_when_2h_is_stronger(self):
+        import goal_overs as g
+        # obie: gol w 1H w 9/10 (minuta 12) i gol w 2H w 10/10
+        def pack(uid):
+            ms = []
+            for i in range(10):
+                gs = [("home", 12), ("away", 60)]
+                if i == 0:
+                    gs = [("away", 60)]  # jeden mecz bez gola w 1H
+                ms.append(self._game(uid, True, gs))
+            return g.team_profile(uid, ms, name="A" if uid=="h" else "B")
+        h, a = pack("h"), pack("a")
+        h["name"], a["name"] = "Alfa", "Beta"
+        best = g.pick_for_match(h, a, {"start_warsaw":"19:00"})
+        one = g.pick_1h_for_match(h, a, {"start_warsaw":"19:00"})
+        self.assertIsNotNone(best)
+        self.assertIsNotNone(one)
+        self.assertEqual(one["key"], "over05_1h")
+        self.assertEqual(one["frac"], "18/20")
+        self.assertGreaterEqual(one["chance"], 0.70)
+        self.assertIn("Szansa:", one["summary"])
+        self.assertIn("1. połowie", one["summary"])
+        # najmocniejszy typ tego meczu to 2H (20/20 vs 18/20)
+        self.assertEqual(best["key"], "over05_2h")
+        self.assertGreater(best["chance"], one["chance"])
+
+    def test_1h_chance_at_minute_20_from_first_goal_times(self):
+        import goal_overs as g
+        # 10 meczów: pierwszy gol w 1H w 30. minucie; 2 mecze bez gola w 1H
+        def one(uid, minute):
+            gs = [("home", minute)] if minute else []
+            return self._game(uid, True, gs)
+        ms_h = [one("h", 30) for _ in range(5)] + [one("h", None) for _ in range(1)]
+        ms_a = [one("a", 30) for _ in range(5)] + [one("a", None) for _ in range(1)]
+        h = g.team_profile("h", ms_h, name="A")
+        a = g.team_profile("a", ms_a, name="B")
+        # na start: 10/12 miało gola w 1H
+        kick = g.chance_block(*(__import__("goal_overs")._pool(h["any_1h"], a["any_1h"])),
+                              g._mean2(h["lam_1h"], a["lam_1h"]), 0.5)
+        self.assertEqual(kick["frac"], "10/12")
+        # o 20. minucie przy 0:0: wszystkie 12 nadal 0:0 (gol był w 30. albo wcale), 10/12 potem strzela
+        ch20 = g.chance_1h_at_minute(h, a, 20)
+        self.assertEqual(ch20["frac"], "10/12")
+        self.assertGreaterEqual(ch20["n"], 8)
+        # o 35. minucie przy 0:0 zostają tylko te 2 bez gola w 1H → 0/2, za mało na typ
+        ch35 = g.chance_1h_at_minute(h, a, 35)
+        self.assertEqual(ch35["frac"], "0/2")
+        self.assertLess(ch35["n"], 8)
+        # gole przed 20. min nie wchodzą do próby warunkowej
+        early = [one("h", 10) for _ in range(8)] + [one("h", 30) for _ in range(8)]
+        late = [one("a", 10) for _ in range(8)] + [one("a", 30) for _ in range(8)]
+        h2 = g.team_profile("h", early, name="A")
+        a2 = g.team_profile("a", late, name="B")
+        ch20b = g.chance_1h_at_minute(h2, a2, 20)
+        # 16 meczów z golem w 10. odpada, zostaje 16 z golem w 30. → 16/16
+        self.assertEqual(ch20b["frac"], "16/16")
+
+    def test_1h_live_uses_remaining_time_at_20(self):
+        import goal_overs as g
+        ms = [self._game("h", True, [("home", 30)]) for _ in range(10)]
+        h = g.team_profile("h", ms, name="Alfa")
+        a = g.team_profile("a", ms, name="Beta")
+        # prematch: typ 1H, szansa na start
+        pre = g.pick_for_match(h, a, {"mode":"prematch"})
+        self.assertEqual(pre["key"], "over05_1h")
+        self.assertIsNotNone(pre.get("chance_min20_pct"))
+        # live 20' 0:0 — ta sama próba 10/10 (gol w 30.)
+        live = g.pick_for_match(h, a, {"mode":"live","minutes":20,"score":"0:0"})
+        self.assertEqual(live["key"], "over05_1h")
+        self.assertIn("20", live["enter"])
+        self.assertEqual(live["frac"], "20/20")  # obie drużyny po 10 meczach
+        # już jest gol — nie typujemy 1H over 0.5
+        dead = g.pick_for_match(h, a, {"mode":"live","minutes":20,"score":"1:0"})
+        self.assertTrue(dead is None or dead["key"] != "over05_1h")
+
     def test_html_has_overs_tab(self):
         self.assertIn("Overy goli", app.HTML)
         self.assertIn("#overy", app.HTML)
         self.assertIn("/api/goal-overs", app.HTML)
         self.assertIn("Najpewniejsze overy dnia", app.HTML)
         self.assertIn("Szansa:", app.HTML)
+        self.assertIn("Ranking 1–10", app.HTML)
+        self.assertIn("Ranking 1. połowy", app.HTML)
+        self.assertIn("1. połowy", app.HTML)
 
     def test_seed_payload_has_chances(self):
         seed = app._seed_payload(now_ts=1_794_400_000)  # 11.11.2026 rano UTC
@@ -963,10 +1059,19 @@ class TGoalOvers(unittest.TestCase):
         self.assertGreaterEqual(p["chance_pct"], 70)
         self.assertRegex(p.get("frac") or "", r"\d+/\d+")
         self.assertTrue(p.get("play"))
+        self.assertGreaterEqual(len(seed.get("picks_1h") or []), 5)
+        p1 = seed["picks_1h"][0]
+        self.assertEqual(p1.get("key"), "over05_1h")
+        self.assertIn("1. połowie", p1.get("play") or "")
+        self.assertIsInstance(p1.get("chance_pct"), int)
+        self.assertGreaterEqual(p1["chance_pct"], 70)
+        self.assertIsInstance(p1.get("chance_kickoff_pct"), int)
+        self.assertTrue(p1.get("summary"))
+        self.assertIn("Szansa:", p1["summary"])
 
     def test_seed_drops_old_matches(self):
         seed = app._seed_payload(now_ts=2_000_000_000)
-        self.assertTrue(seed is None or not seed.get("picks"))
+        self.assertTrue(seed is None or (not seed.get("picks") and not seed.get("picks_1h")))
 
     def test_no_second_worker_while_job_runs(self):
         import time
@@ -1005,13 +1110,14 @@ class TGoalOvers(unittest.TestCase):
             {"eventId": 1, "chance": 0.8, "chance_pct": 80, "play": "SEED", "n": 10, "ts": time.time() + 3600},
             {"eventId": 2, "chance": 0.9, "chance_pct": 90, "play": "SEED2", "n": 10, "ts": time.time() + 3600},
         ]
-        picks, src = app._merge_picks(live, set(), seed)
+        picks, picks_1h, src = app._merge_picks(live, set(), seed)
         self.assertEqual(src, "mixed")
         self.assertEqual(picks[0]["play"], "LIVE")
         self.assertEqual(picks[1]["play"], "SEED2")
-        picks2, src2 = app._merge_picks(live, {2}, seed)
+        picks2, picks_1h2, src2 = app._merge_picks(live, {2}, seed)
         self.assertEqual(src2, "live")
         self.assertEqual(len(picks2), 1)
+        self.assertEqual(picks_1h, [])
 
     def test_disk_cache_survives_memory_clear(self):
         import tempfile, shutil
