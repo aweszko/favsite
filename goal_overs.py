@@ -180,6 +180,8 @@ def match_view(uid, is_home, goals, ft=None, p1=None, timeline_ok=True, mid=None
         "first_1h": min((g["minute"] for g in goals if g["half"] == 1), default=None),
         # znamy minutę 1. gola w 1H albo wiemy, że gola w 1H nie było (także z p1=0:0 bez timeline)
         "first_1h_known": bool(timeline_ok) or (ht_h + ht_a) == 0,
+        "first_2h": min((g["minute"] for g in goals if g["half"] == 2), default=None),
+        "first_2h_known": bool(timeline_ok) or tot_2h == 0,
         "trailing_ht": gf_ht < ga_ht, "leading_ht": gf_ht > ga_ht, "level_ht": gf_ht == ga_ht,
         "ht_00": ht_h == 0 and ht_a == 0,
         "ht_le1": (ht_h + ht_a) <= 1,  # 0:0, 1:0, 0:1
@@ -204,6 +206,8 @@ def team_profile(uid, matches, name=None):
     g1, n1 = cnt(lambda m: m.get("any_1h"))
     g2, n2 = cnt(lambda m: m.get("any_2h"))
     over15, n15 = cnt(lambda m: (m.get("tot") is not None) and m["tot"] >= 2)
+    over25, n25 = cnt(lambda m: (m.get("tot") is not None) and m["tot"] >= 3)
+    btts, nbtts = cnt(lambda m: (m.get("gf") is not None and m.get("ga") is not None) and m["gf"] >= 1 and m["ga"] >= 1)
     late, nl = cnt(lambda m: m.get("any_late") if m.get("timeline_ok") else None)
     s2, ns2 = cnt(lambda m: m.get("scored_2h"))
     no1, nn1 = cnt(lambda m: m.get("gf_1h") == 0 if m.get("gf_1h") is not None else (m.get("gf_ht") == 0))
@@ -230,7 +234,8 @@ def team_profile(uid, matches, name=None):
     firsts = [m["first"] for m in ms if m.get("first") is not None]
     return {
         "uid": uid, "name": name, "n": n, "n_tl": len(tl),
-        "any_1h": (g1, n1), "any_2h": (g2, n2), "over15": (over15, n15), "any_late": (late, nl),
+        "any_1h": (g1, n1), "any_2h": (g2, n2), "over15": (over15, n15), "over25": (over25, n25),
+        "btts": (btts, nbtts), "any_late": (late, nl),
         "scored_2h": (s2, ns2), "no_goal_1h": (no1, nn1),
         "cond_2h": (c2, nc2), "cond00_2h": (c2_00, nc2_00),
         "lam_tot": _mean([m.get("tot") for m in ms]),
@@ -317,6 +322,65 @@ def chance_1h_at_minute(home, away, t):
     return chance_block(k, n, lam, 0.5)
 
 
+def _2h_remaining_sample(matches, t):
+    """Mecze, o których wiemy, że do minuty t nie było gola w 2. połowie, i czy potem padł."""
+    try:
+        t = int(t)
+    except (TypeError, ValueError):
+        return []
+    sample = []
+    for m in matches or []:
+        if not m:
+            continue
+        if not m.get("first_2h_known"):
+            continue
+        first = m.get("first_2h")
+        if first is not None and first <= t:
+            continue
+        rem = 0
+        if first is not None and first > t:
+            rem = sum(1 for g in (m.get("goals") or []) if g.get("half") == 2 and (g.get("minute") or 0) > t)
+        sample.append((rem >= 1, rem))
+    return sample
+
+
+def chance_2h_at_minute(home, away, t):
+    """Szansa na gola w pozostałym czasie 2. połowy, gdy do minuty t nie było gola w 2H."""
+    sample = _2h_remaining_sample((home.get("matches") or []) + (away.get("matches") or []), t)
+    if not sample:
+        return chance_block(0, 0, None, 0.5)
+    k = sum(1 for ok, _ in sample if ok)
+    n = len(sample)
+    lam = _mean([rem for _, rem in sample])
+    return chance_block(k, n, lam, 0.5)
+
+
+def _goal_after_sample(matches, t):
+    """Mecze z znanymi minutami: czy po minucie t padł jeszcze jakiś gol."""
+    try:
+        t = int(t)
+    except (TypeError, ValueError):
+        return []
+    sample = []
+    for m in matches or []:
+        if not m or not m.get("timeline_ok"):
+            continue
+        rem = sum(1 for g in (m.get("goals") or []) if (g.get("minute") or 0) > t)
+        sample.append((rem >= 1, rem))
+    return sample
+
+
+def chance_goal_after_minute(home, away, t):
+    """Szansa, że po minucie t padnie jeszcze co najmniej jeden gol w meczu."""
+    sample = _goal_after_sample((home.get("matches") or []) + (away.get("matches") or []), t)
+    if not sample:
+        return chance_block(0, 0, None, 0.5)
+    k = sum(1 for ok, _ in sample if ok)
+    n = len(sample)
+    lam = _mean([rem for _, rem in sample])
+    return chance_block(k, n, lam, 0.5)
+
+
 def _1h_enter(uncond, by_minute):
     """Prosty warunek wejścia z uczciwych szans na start i w 20./25. minucie."""
     bits = []
@@ -346,8 +410,12 @@ def _event_phrase(play):
         return "Gol w 2. połowie"
     if "75" in p:
         return "Gol po 75. minucie"
+    if "2.5" in p:
+        return "Co najmniej trzy gole"
     if "1.5" in p:
         return "Co najmniej dwa gole"
+    if "btts" in p or "obie drużyny" in p:
+        return "Obie drużyny strzeliły"
     return "Ten typ"
 
 def _summary(play, used, enter, extra=None):
@@ -430,6 +498,38 @@ def build_markets(home, away, meta=None):
         "uncond": ch, "cond": ch_c,
         "use_cond": cn >= MIN_N,
     })
+    # 2b) Over 2.5 w meczu
+    k, n = _pool(home.get("over25"), away.get("over25"))
+    lam = _mean2(home.get("lam_tot"), away.get("lam_tot"))
+    ch25 = chance_block(k, n, lam, 2.5)
+    out.append({
+        "key": "over25",
+        "play": "Over 2.5 gola w meczu",
+        "enter": "przed meczem",
+        "uncond": ch25, "cond": None,
+        "use_cond": False,
+    })
+    # 2c) BTTS
+    k, n = _pool(home.get("btts"), away.get("btts"))
+    p_h = pois_over(0.5, home.get("lam_gf")) if home.get("lam_gf") is not None else None
+    p_a = pois_over(0.5, away.get("lam_gf")) if away.get("lam_gf") is not None else None
+    p_pois_btts = (p_h * p_a) if (p_h is not None and p_a is not None) else None
+    p_emp = laplace(k, n) if n else None
+    p = combine(p_emp, p_pois_btts)
+    p_raw = (k / n) if n else None
+    ch_b = {
+        "k": k, "n": n, "frac": frac(k, n), "p_raw": p_raw,
+        "p_emp": p_emp, "p_pois": p_pois_btts, "p": p,
+        "pct": pct(p), "lam": None,
+        "spread": None if p_emp is None or p_pois_btts is None else abs(p_emp - p_pois_btts),
+    }
+    out.append({
+        "key": "btts",
+        "play": "BTTS (obie drużyny strzelą)",
+        "enter": "przed meczem",
+        "uncond": ch_b, "cond": None,
+        "use_cond": False,
+    })
     # 3) Gol po 75. min (over 0.5 w 76–90+)
     k, n = _pool(home.get("any_late"), away.get("any_late"))
     ch = chance_block(k, n, _mean2(home.get("lam_late"), away.get("lam_late")), 0.5)
@@ -475,6 +575,12 @@ def _why(market, used):
         if market.get("use_cond"):
             return "przy najwyżej 1 golu do przerwy over 1.5 wchodził w %s ostatnich meczów obu drużyn" % fr
         return "w meczu padały co najmniej 2 gole w %s ostatnich meczów obu drużyn" % fr
+    if key == "over25":
+        return "w meczu padały co najmniej 3 gole w %s ostatnich meczów obu drużyn" % fr
+    if key == "btts":
+        return "obie drużyny strzeliły w %s ostatnich meczów tych drużyn" % fr
+    if key == "over_next":
+        return "po tej minucie padł jeszcze co najmniej jeden gol w %s meczach tych drużyn" % fr
     if key == "over05_late":
         return "gol po 75. minucie padł w %s ostatnich meczów obu drużyn z znanymi minutami" % fr
     if key.startswith("team2h_"):
@@ -640,6 +746,280 @@ def pick_1h_for_match(home, away, meta=None, p_min=P_MIN, min_n=MIN_N):
     return None
 
 
+PRE_KEYS = ("over15", "over25", "over05_1h", "over05_2h", "btts")
+
+
+def pick_pre_for_match(home, away, meta=None, p_min=P_MIN, min_n=MIN_N):
+    """Najmocniejszy typ przedmeczowy (1.5 / 2.5 / 0.5 1H / 0.5 2H / BTTS)."""
+    best = None
+    for card in qualifying_cards(home, away, meta, p_min=p_min, min_n=min_n):
+        if card.get("key") not in PRE_KEYS:
+            continue
+        card = dict(card)
+        card["summary"] = pre_summary(card)
+        if best is None or (card["chance"], card["n"]) > (best["chance"], best["n"]):
+            best = card
+    return best
+
+
+def pre_summary(card):
+    play = card.get("play") or "ten typ"
+    typ = play[0].lower() + play[1:] if play else "ten typ"
+    fr = card.get("frac") or "—"
+    pct_s = card.get("chance_pct")
+    chance_s = ("ok. %d%%" % pct_s) if pct_s is not None else "—"
+    key = card.get("key")
+    if key == "over15":
+        body = "Padły 2+ gole w %s meczach tych drużyn." % fr
+    elif key == "over25":
+        body = "Padły 3+ gole w %s meczach tych drużyn." % fr
+    elif key == "over05_1h":
+        body = "Gol w 1. połowie padł w %s meczach tych drużyn." % fr
+        ch20 = card.get("frac_min20")
+        if card.get("chance_min20_pct") is not None and ch20:
+            body += " Przy 0:0 po 20. min w %s." % ch20
+    elif key == "over05_2h":
+        body = "Gol w 2. połowie padł w %s meczach tych drużyn." % fr
+    elif key == "btts":
+        body = "Obie drużyny strzeliły w %s meczach tych drużyn." % fr
+    else:
+        body = "Schemat wszedł w %s meczach tych drużyn." % fr
+    text = "Warto rozważyć %s. %s Szansa: %s." % (typ, body, chance_s)
+    if card.get("odds"):
+        text += " Kurs Superbet: %s." % _fmt_odds(card["odds"])
+    return text
+
+
+def _fmt_odds(x):
+    try:
+        return ("%.2f" % float(x)).replace(".", ",")
+    except (TypeError, ValueError):
+        return str(x)
+
+
+def _intish(x):
+    try:
+        return int(float(str(x).strip()))
+    except (TypeError, ValueError):
+        return None
+
+
+def phase_of(period, minute):
+    p = (period or "").upper()
+    if p in ("FT", "ENDED", "END", "AET", "FIN"):
+        return "ft"
+    if p in ("HT", "PRZ"):
+        return "ht"
+    if p in ("1P", "1H", "H1"):
+        return "1h"
+    if p in ("2P", "2H", "H2"):
+        return "2h"
+    if minute is not None:
+        return "1h" if minute <= 45 else "2h"
+    return None
+
+
+def time_label(phase, minute, period=None):
+    if phase == "ht":
+        return "przerwa"
+    if phase == "1h":
+        return ("%d' (1. połowa)" % minute) if minute is not None else "1. połowa"
+    if phase == "2h":
+        return ("%d' (2. połowa)" % minute) if minute is not None else "2. połowa"
+    if minute is not None:
+        return "%d'" % minute
+    return period or "live"
+
+
+def _period_score(periods, which):
+    for p in periods or []:
+        typ = (p.get("type") or "").upper()
+        num = _intish(p.get("num"))
+        h, a = _intish(p.get("homeTeamScore")), _intish(p.get("awayTeamScore"))
+        if h is None or a is None:
+            continue
+        if which == 1 and (typ in ("FIRST_HALF",) or (typ in ("REGULARPERIOD", "REGULAR") and num == 1) or num == 1):
+            if typ in ("SECOND_HALF",):
+                continue
+            if num == 1 or typ == "FIRST_HALF":
+                return (h, a)
+        if which == 2 and (typ in ("SECOND_HALF",) or (typ in ("REGULARPERIOD", "REGULAR") and num == 2) or num == 2):
+            if typ in ("FIRST_HALF",):
+                continue
+            if num == 2 or typ == "SECOND_HALF":
+                return (h, a)
+    # second pass: num only
+    for p in periods or []:
+        num = _intish(p.get("num"))
+        typ = (p.get("type") or "").upper()
+        h, a = _intish(p.get("homeTeamScore")), _intish(p.get("awayTeamScore"))
+        if h is None or a is None:
+            continue
+        if which == 1 and num == 1 and typ != "SECOND_HALF":
+            return (h, a)
+        if which == 2 and num == 2 and typ != "FIRST_HALF":
+            return (h, a)
+    return None
+
+
+def parse_live_state(meta):
+    """Aktualna minuta, wynik, faza i gole w połowach — tylko z danych live, bez zgadywania 2H."""
+    meta = meta or {}
+    minute = _live_minute(meta)
+    period = (meta.get("period") or "")
+    score = _parse_score(meta.get("score"))
+    phase = phase_of(period, minute)
+    hs = aws = tot = None
+    if score:
+        hs, aws = score
+        tot = hs + aws
+    p1 = _period_score(meta.get("periods"), 1)
+    p2 = _period_score(meta.get("periods"), 2)
+    goals_1h = goals_2h = None
+    if phase in ("1h", "ht"):
+        goals_1h = tot
+        goals_2h = 0
+        if phase == "ht" and p1 is not None:
+            goals_1h = p1[0] + p1[1]
+        if phase == "1h" and p1 is not None and tot is None:
+            goals_1h = p1[0] + p1[1]
+            tot = goals_1h
+    elif phase == "2h":
+        if p1 is not None and tot is not None:
+            goals_1h = p1[0] + p1[1]
+            goals_2h = tot - goals_1h
+            if goals_2h < 0:
+                goals_2h = None
+        elif p2 is not None:
+            goals_2h = p2[0] + p2[1]
+            if tot is not None:
+                goals_1h = tot - goals_2h
+        # bez p1/p2 nie zgadujemy, czy gol w 2H już padł
+    t_ref = minute
+    if phase == "ht":
+        t_ref = 45
+    elif t_ref is None and phase == "1h":
+        t_ref = 0
+    score_s = None if hs is None else "%d:%d" % (hs, aws)
+    return {
+        "phase": phase, "minute": minute, "t_ref": t_ref, "period": period,
+        "score": (hs, aws) if hs is not None else None, "score_s": score_s,
+        "tot": tot, "goals_1h": goals_1h, "goals_2h": goals_2h,
+        "p1": p1, "p2": p2, "time_label": time_label(phase, minute, period),
+    }
+
+
+def _live_card(home, away, meta, market, used, why_bits, st):
+    play = market["play"]
+    enter = market.get("enter") or ("teraz, %s" % st["time_label"])
+    why = "; ".join(why_bits)
+    card = {
+        "key": market["key"],
+        "play": play,
+        "enter": enter,
+        "why": why,
+        "chance": used["p"],
+        "chance_pct": used["pct"],
+        "frac": used["frac"],
+        "p_emp": used["p_emp"],
+        "p_pois": used["p_pois"],
+        "p_raw": used["p_raw"],
+        "lam": used.get("lam"),
+        "n": used["n"],
+        "k": used["k"],
+        "conditional": True,
+        "warnings": _warnings(market, used, home, away, meta),
+        "home": home.get("name"), "away": away.get("name"),
+        "score": st.get("score_s"),
+        "minutes": st.get("minute"),
+        "period": st.get("period"),
+        "phase": st.get("phase"),
+        "time_label": st.get("time_label"),
+        "mode": "live",
+    }
+    if meta:
+        for k, v in meta.items():
+            card.setdefault(k, v)
+    card["summary"] = live_summary(card, why)
+    return card
+
+
+def live_summary(card, why=None):
+    home = card.get("home") or card.get("home_name") or "?"
+    away = card.get("away") or card.get("away_name") or "?"
+    sc = card.get("score") or "–"
+    tl = card.get("time_label") or (("%d'" % card["minutes"]) if card.get("minutes") is not None else "live")
+    play = card.get("play") or "ten typ"
+    typ = play[0].lower() + play[1:] if play else "ten typ"
+    pct_s = card.get("chance_pct")
+    chance_s = ("ok. %d%%" % pct_s) if pct_s is not None else "—"
+    why = why or card.get("why") or ""
+    why_s = why[0].lower() + why[1:] if why else ""
+    if why_s and not why_s.endswith("."):
+        why_s += "."
+    return "%s – %s, %s, %s. Zagraj %s. Szansa: %s. %s" % (
+        home, away, sc, tl, typ, chance_s, why_s)
+
+
+def pick_live_for_match(home, away, meta=None, p_min=P_MIN, min_n=MIN_N):
+    """Jeden typ na mecz live, wg aktualnej minuty i wyniku. Pomija typy, które już weszły."""
+    meta = meta or {}
+    st = parse_live_state(meta)
+    if st.get("phase") in (None, "ft"):
+        return None
+    if (home.get("n") or 0) < min_n or (away.get("n") or 0) < min_n:
+        return None
+    period_card = None
+    # 1) Over 0.5 1H — tylko 1. połowa i 0:0
+    if st["phase"] == "1h" and st.get("tot") == 0 and st.get("t_ref") is not None:
+        ch = chance_1h_at_minute(home, away, st["t_ref"])
+        base_k, base_n = _pool(home.get("any_1h"), away.get("any_1h"))
+        if ch.get("p") is not None and (ch.get("n") or 0) >= min_n and ch["p"] >= p_min:
+            why = ["gol w 1. połowie padł w %s meczów tych drużyn" % (frac(base_k, base_n) or "—")]
+            why.append("przy 0:0 po %d. min w %s" % (st["t_ref"], ch.get("frac") or "—"))
+            m = {"key": "over05_1h", "play": "Over 0.5 gola w 1. połowie",
+                 "enter": "teraz, przy 0:0 w %s" % st["time_label"], "use_cond": True, "cond": ch}
+            period_card = _live_card(home, away, meta, m, ch, why, st)
+            period_card["frac_base"] = frac(base_k, base_n)
+            period_card["frac_cond"] = ch.get("frac")
+    # 2) Over 0.5 2H — przerwa albo 2H bez gola w 2H
+    if st["phase"] in ("ht", "2h") and st.get("goals_2h") == 0 and st.get("t_ref") is not None:
+        ch = chance_2h_at_minute(home, away, st["t_ref"])
+        base_k, base_n = _pool(home.get("any_2h"), away.get("any_2h"))
+        if ch.get("p") is not None and (ch.get("n") or 0) >= min_n and ch["p"] >= p_min:
+            why = ["gol w 2. połowie padł w %s meczów tych drużyn" % (frac(base_k, base_n) or "—")]
+            if st["phase"] == "ht":
+                why.append("do przerwy bez gola w 2. połowie w %s" % (ch.get("frac") or "—"))
+            else:
+                why.append("bez gola w 2. połowie po %d. min w %s" % (st["t_ref"], ch.get("frac") or "—"))
+            m = {"key": "over05_2h", "play": "Over 0.5 gola w 2. połowie",
+                 "enter": "teraz, %s, bez gola w 2. połowie" % st["time_label"], "use_cond": True, "cond": ch}
+            period_card = _live_card(home, away, meta, m, ch, why, st)
+            period_card["frac_base"] = frac(base_k, base_n)
+            period_card["frac_cond"] = ch.get("frac")
+    if period_card:
+        return period_card
+    # 3) ewentualnie over aktualnej sumy + 0.5 (następny gol), gdy typ połowy już wszedł albo nie ma sensu
+    if st.get("tot") is None or st.get("t_ref") is None:
+        return None
+    ch = chance_goal_after_minute(home, away, st["t_ref"])
+    if ch.get("p") is None or (ch.get("n") or 0) < min_n or ch["p"] < p_min:
+        return None
+    line = st["tot"] + 0.5
+    play = "Over %s gola w meczu" % str(line).replace(".0", "")
+    # 0.5 -> "0.5"; 1.5 stays
+    if float(line) == int(line) + 0.5:
+        play = "Over %s gola w meczu" % (("%0.1f" % line).replace(".", ","))
+    why = ["po %d. minucie padł jeszcze co najmniej jeden gol w %s meczach tych drużyn" % (
+        st["t_ref"], ch.get("frac") or "—")]
+    m = {"key": "over_next", "play": play,
+         "enter": "teraz, %s, wynik %s" % (st["time_label"], st.get("score_s") or "–"),
+         "use_cond": True, "cond": ch}
+    card = _live_card(home, away, meta, m, ch, why, st)
+    card["line"] = line
+    return card
+
+
 def rank_picks(cards, limit=MAX_PICKS):
     cards = [c for c in cards if c and c.get("chance") is not None]
     cards.sort(key=lambda c: (-c["chance"], -c.get("n", 0), c.get("ts") or 0))
@@ -654,7 +1034,8 @@ def public_card(c):
             "home_name", "away_name", "tournament", "category", "mode", "minutes", "score",
             "play", "enter", "why", "summary", "chance", "chance_pct", "frac", "p_emp", "p_pois",
             "p_raw", "lam", "n", "k", "conditional", "warnings", "key", "start_pl",
-            "chance_kickoff_pct", "chance_min20_pct", "frac_min20", "n_min20")
+            "chance_kickoff_pct", "chance_min20_pct", "frac_min20", "n_min20",
+            "odds", "time_label", "phase", "period", "frac_base", "frac_cond", "line")
     out = {k: c.get(k) for k in keys}
     if out.get("p_emp") is not None:
         out["p_emp"] = round(out["p_emp"], 4)
@@ -672,5 +1053,6 @@ CHANCE_RULE = (
     "oraz 45% rozkładu Poissona ze średniej liczby goli w tym okresie (1. połowa, 2. połowa, cały mecz albo 76–90+). "
     "Gdy jest co najmniej 8 meczów z tym samym stanem (do przerwy albo 0:0 w danej minucie 1. połowy), liczona jest szansa warunkowa. "
     "Dla over 0.5 w 1. połowie podawana jest szansa na start i — o ile próba pozwala — w 20. minucie przy 0:0, z rozkładu minut pierwszych goli. "
+    "W zakładce live szansa jest liczona od aktualnej minuty i wyniku (gol w pozostałym czasie danej połowy albo over aktualnej sumy + 0.5). "
     "Podawany jest procent i ułamek źródłowy k/n. To częstość + model, nie gwarancja."
 )

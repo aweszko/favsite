@@ -194,6 +194,7 @@ def fetch_list(state):
                     "day_warsaw": to_warsaw(dt).strftime("%Y-%m-%d") if dt else "",
                     "minutes": m.get("minutes"), "period": m.get("periodStatus"),
                     "score": None if m.get("homeTeamScore") is None else "%s:%s" % (m.get("homeTeamScore"), m.get("awayTeamScore")),
+                    "periods": m.get("periods") or [],
                     "status": m.get("status"), "mode": state, "o1": o1, "ox": ox, "o2": o2})
     if state == "live":   # w liście live brak kursów -> równolegle /events/{id} (cache 55 s)
         need = [e for e in out if e["o1"] is None]
@@ -1610,6 +1611,7 @@ def team_goal_views(uid, exclude_br=None, history=None):
                 mv["ht_le1"] = mv["tot_1h"] <= 1
                 mv["any_1h"] = mv["tot_1h"] >= 1
                 mv["first_1h_known"] = bool(mv.get("timeline_ok")) or mv["tot_1h"] == 0
+                mv["first_2h_known"] = bool(mv.get("timeline_ok")) or mv["tot_2h"] == 0
             ms.append(mv)
         return ms
     return cached("gviews:%s:%s:%s" % (uid, exclude_br or "", n_hist), TEAM_TTL, f)
@@ -1722,6 +1724,9 @@ def _merge_picks(live_cards, processed_ids, seed_picks=None, live_1h=None, seed_
 
 def _publish_overs(cards, evs, today, tomorrow, skipped, processed_ids, partial, seed_picks=None, cards_1h=None, seed_1h=None):
     picks, picks_1h, source = _merge_picks(cards, processed_ids, seed_picks, live_1h=cards_1h, seed_1h=seed_1h)
+    if not partial:
+        _attach_over_odds(picks)
+        _attach_over_odds(picks_1h)
     now = datetime.now(timezone.utc)
     res = {
         "generated_warsaw": to_warsaw(now).strftime("%Y-%m-%d %H:%M:%S"),
@@ -1767,7 +1772,7 @@ def _overs_one(ev):
                     mode=ev.get("mode") or "prematch", minutes=ev.get("minutes"),
                     score=ev.get("score"), br=ev.get("br"),
                     start_pl=("%s %s" % (ev.get("day_warsaw") or "", ev.get("start_warsaw") or "")).strip())
-        card = goal_overs.pick_for_match(hp, ap, meta)
+        card = goal_overs.pick_pre_for_match(hp, ap, meta)
         card_1h = goal_overs.pick_1h_for_match(hp, ap, meta)
         return ev, "ok", card, card_1h
     except Exception as ex:
@@ -1873,6 +1878,287 @@ def get_overs():
             "picks": []}
 
 
+
+# ---------- kursy over/BTTS z Superbet (tylko dla czołówki przedmeczowej) ----------
+_OVER_ODDS_WANT = {
+    ("liczba goli", "powyżej 1.5"): "over15",
+    ("liczba goli", "powyżej 2.5"): "over25",
+    ("1.połowa - liczba goli", "powyżej 0.5"): "over05_1h",
+    ("1. połowa - liczba goli", "powyżej 0.5"): "over05_1h",
+    ("2.połowa - liczba goli", "powyżej 0.5"): "over05_2h",
+    ("2. połowa - liczba goli", "powyżej 0.5"): "over05_2h",
+    ("obie drużyny strzelą", "tak"): "btts",
+}
+
+def parse_over_odds(odds):
+    """Wyciąga kursy prostych rynków over/BTTS; pomija kombinacje i nieaktywne."""
+    out = {}
+    for o in odds or []:
+        st = (o.get("status") or "").lower()
+        if st in ("block", "blocked", "suspended", "deactivated", "inactive"):
+            continue
+        mn = (o.get("marketName") or "").strip().lower()
+        on = (o.get("name") or "").strip().lower()
+        if ";" in mn or " & " in mn or " lub " in mn:
+            continue
+        key = _OVER_ODDS_WANT.get((mn, on))
+        if not key:
+            continue
+        try:
+            price = float(o.get("price"))
+        except (TypeError, ValueError):
+            continue
+        if price <= 1:
+            continue
+        out[key] = price
+    return out
+
+
+def event_over_odds(eid):
+    if not eid:
+        return {}
+    def f():
+        d = http_json("%s/events/%s" % (SB, eid), "Superbet")
+        if not d:
+            return None
+        ev = d.get("data")
+        if isinstance(ev, list):
+            ev = ev[0] if ev else {}
+        return parse_over_odds((ev or {}).get("odds"))
+    return cached("overodds:%s" % eid, 600, f) or {}
+
+
+def _attach_over_odds(picks):
+    eids, seen = [], set()
+    for p in picks or []:
+        eid = p.get("eventId")
+        if eid and eid not in seen:
+            seen.add(eid)
+            eids.append(eid)
+        if len(eids) >= goal_overs.MAX_PICKS:
+            break
+    if not eids:
+        return picks
+    got = {}
+    with ThreadPoolExecutor(2) as ex:
+        for eid, od in zip(eids, ex.map(event_over_odds, eids)):
+            got[eid] = od or {}
+    for p in picks or []:
+        price = (got.get(p.get("eventId")) or {}).get(p.get("key"))
+        if price:
+            p["odds"] = price
+            p["summary"] = goal_overs.pre_summary(p)
+    return picks
+
+
+# ---------- Overy LIVE (tylko mecze trwające) ----------
+LIVE_OVERS_TTL = 55
+LIVE_OVERS_STATE = {"res": None, "t": 0, "job": None}
+LIVE_PROFILES = {}  # eventId -> (home_profile, away_profile)
+LIVE_FAIL_UNTIL = {}  # eventId -> unix, krótki backoff po błędzie
+
+
+def fetch_live_football():
+    """Lista live piłki z Superbet: wynik, minuta, okres, betradarId. Bez dociągania kursów 1X2."""
+    def f():
+        now = datetime.now(timezone.utc)
+        a, b = _window("live", now)
+        q = urllib.parse.urlencode({"currentStatus": "active", "offerState": "live",
+                                    "startDate": fmt(a), "endDate": fmt(b)})
+        d = http_json(SB + "/events/by-date?" + q, "Superbet")
+        if d is None:
+            return None
+        stc = struct()
+        out = []
+        for e in d.get("data") or []:
+            if e.get("sportId") != 5:
+                continue
+            m = e.get("metadata") or {}
+            name = e.get("matchName") or ""
+            parts = name.split("·") if "·" in name else name.split(" - ")
+            start = e.get("utcDate") or e.get("matchDate") or e.get("startDate")
+            dt = parse_utc(start)
+            tn = stc["t"].get(str(e.get("tournamentId")), ("", 0))
+            out.append({
+                "eventId": e.get("eventId"), "name": name.replace("·", " – "),
+                "home": parts[0].strip() if parts else "",
+                "away": parts[1].strip() if len(parts) > 1 else "",
+                "br": str(e.get("betradarId") or m.get("brId") or "") or None,
+                "tournamentId": e.get("tournamentId"), "league": tn[0] or None,
+                "country": stc["c"].get(str(e.get("categoryId"))) or None,
+                "start": start, "ts": int(dt.timestamp() * 1000) if dt else None,
+                "start_warsaw": to_warsaw(dt).strftime("%H:%M") if dt else "",
+                "day_warsaw": to_warsaw(dt).strftime("%Y-%m-%d") if dt else "",
+                "minutes": m.get("minutes"), "period": m.get("periodStatus"),
+                "score": None if m.get("homeTeamScore") is None else "%s:%s" % (m.get("homeTeamScore"), m.get("awayTeamScore")),
+                "periods": m.get("periods") or [],
+                "status": m.get("status"), "mode": "live",
+            })
+        return out
+    return cached("list:live-foot", LIST_TTL, f) or []
+
+
+def _live_meta(ev):
+    return dict(eventId=ev.get("eventId"), start_warsaw=ev.get("start_warsaw"),
+                day_warsaw=ev.get("day_warsaw"), ts=ev.get("ts"),
+                home=ev.get("home"), away=ev.get("away"),
+                home_name=ev.get("home"), away_name=ev.get("away"),
+                tournament=ev.get("league"), category=ev.get("country"),
+                mode="live", minutes=ev.get("minutes"), score=ev.get("score"),
+                period=ev.get("period"), periods=ev.get("periods") or [],
+                br=ev.get("br"),
+                start_pl=("%s %s" % (ev.get("day_warsaw") or "", ev.get("start_warsaw") or "")).strip())
+
+
+def _live_profile_pair(ev):
+    mi = match_info(ev["br"])
+    if not mi:
+        return None
+    hu = (mi.get("home") or {}).get("uid")
+    au = (mi.get("away") or {}).get("uid")
+    if not hu or not au:
+        return None
+    hv = team_goal_views(hu, ev.get("br"))
+    av = team_goal_views(au, ev.get("br"))
+    if not hv or not av:
+        return None
+    hp = goal_overs.team_profile(str(hu), hv, name=ev.get("home") or (mi["home"] or {}).get("name"))
+    ap = goal_overs.team_profile(str(au), av, name=ev.get("away") or (mi["away"] or {}).get("name"))
+    return hp, ap
+
+
+def _publish_live_overs(evs, partial=False):
+    cards, skipped = [], {"nobr": 0, "nostats": 0, "thin": 0, "done": 0}
+    for ev in evs:
+        if not ev.get("br"):
+            skipped["nobr"] += 1
+            continue
+        pair = LIVE_PROFILES.get(ev.get("eventId"))
+        if not pair:
+            if ev.get("eventId") in LIVE_PROFILES:
+                skipped["nostats"] += 1
+            continue
+        if pair is None:
+            skipped["nostats"] += 1
+            continue
+        hp, ap = pair
+        card = goal_overs.pick_live_for_match(hp, ap, _live_meta(ev))
+        skipped["done"] += 1
+        if card:
+            cards.append(card)
+        else:
+            skipped["thin"] += 1
+    picks = [goal_overs.public_card(c) for c in goal_overs.rank_picks(cards, limit=goal_overs.MAX_PICKS)]
+    now = datetime.now(timezone.utc)
+    res = {
+        "generated_warsaw": to_warsaw(now).strftime("%Y-%m-%d %H:%M:%S"),
+        "picks": picks, "n_picks": len(picks),
+        "source": "live", "partial": partial, "mode": "live",
+        "footer": {"matches": len(evs), "checked": skipped["done"],
+                   "without_stats": skipped["nostats"] + skipped["nobr"],
+                   "too_weak": skipped["thin"], "min_n": goal_overs.MIN_N,
+                   "p_min": goal_overs.P_MIN},
+        "rule": goal_overs.CHANCE_RULE,
+        "note": "Tylko mecze LIVE. Szansa od aktualnej minuty i wyniku, z minut goli obu drużyn (min. 8 meczów, szansa ≥ 70%). Forma, nie gwarancja. Nic nie jest stawiane.",
+    }
+    with LOCK:
+        LIVE_OVERS_STATE.update(res=res, t=time.time())
+    return res
+
+
+def _live_overs_one(ev):
+    try:
+        if not ev.get("br"):
+            return ev, None
+        pair = _live_profile_pair(ev)
+        return ev, pair
+    except Exception as ex:
+        ERRORS["overy_live"] = "%s: %s" % (type(ex).__name__, ex)
+        return ev, None
+
+
+def build_overs_live(progress=None, job=None):
+    evs = fetch_live_football()
+    if progress is not None:
+        progress.update(done=0, total=len(evs))
+    now = time.time()
+    need = [e for e in evs if e.get("br") and e.get("eventId") not in LIVE_PROFILES
+            and (LIVE_FAIL_UNTIL.get(e.get("eventId")) or 0) < now]
+    def touch(ev, pair):
+        eid = ev.get("eventId")
+        with LOCK:
+            if pair:
+                LIVE_PROFILES[eid] = pair
+                LIVE_FAIL_UNTIL.pop(eid, None)
+            else:
+                LIVE_FAIL_UNTIL[eid] = time.time() + 120
+        if progress is not None:
+            with LOCK:
+                progress["done"] = progress.get("done", 0) + 1
+                if job is not None:
+                    job["beat"] = time.time()
+        _publish_live_overs(evs, partial=True)
+
+    if need:
+        with ThreadPoolExecutor(OVERS_WORKERS) as pool:
+            futs = [pool.submit(_live_overs_one, ev) for ev in need]
+            for fut in as_completed(futs):
+                if job and job.get("cancel"):
+                    break
+                ev, pair = fut.result()
+                touch(ev, pair)
+    return _publish_live_overs(evs, partial=False)
+
+
+def _live_overs_worker(job):
+    try:
+        build_overs_live(job.get("progress"), job=job)
+        with LOCK:
+            ERRORS.pop("overy_live_job", None)
+    except Exception as e:
+        ERRORS["overy_live"] = "%s: %s" % (type(e).__name__, e)
+    finally:
+        with LOCK:
+            if LIVE_OVERS_STATE.get("job") is job:
+                LIVE_OVERS_STATE["job"] = None
+
+
+def get_overs_live():
+    """Karty z cache'owanych profili od razu, stan live co ~minutę, historia z dysku/pamięci."""
+    evs = fetch_live_football()
+    # usuń zakończone z bieżącego widoku (profile zostają)
+    res = _publish_live_overs(evs, partial=bool(LIVE_OVERS_STATE.get("job")))
+    missing = [e for e in evs if e.get("br") and e.get("eventId") not in LIVE_PROFILES
+               and (LIVE_FAIL_UNTIL.get(e.get("eventId")) or 0) < time.time()]
+    with LOCK:
+        job = LIVE_OVERS_STATE.get("job")
+        if missing and job is None:
+            job = LIVE_OVERS_STATE["job"] = {
+                "progress": {"done": 0, "total": len(missing)},
+                "started": time.time(), "beat": time.time(), "cancel": False,
+            }
+            threading.Thread(target=_live_overs_worker, args=(job,), daemon=True).start()
+        elif job and not missing:
+            # nic do doliczenia — nie startuj drugiego
+            pass
+        res_now, t = LIVE_OVERS_STATE.get("res") or res, LIVE_OVERS_STATE.get("t") or 0
+    out = dict(res_now or res)
+    computing = bool(job) and bool(missing or (job and (time.time() - (job.get("started") or 0)) < 2))
+    # jeśli worker jeszcze działa, UI odpytuje częściej tylko na początku
+    if job and missing:
+        out["status"] = "computing"
+        out["progress"] = dict(job.get("progress") or {})
+        out["elapsed_seconds"] = round(time.time() - job["started"])
+    else:
+        out["status"] = "ready"
+    out["stale"] = False
+    out["age_seconds"] = round(time.time() - t) if t else None
+    out["errors"] = dict(ERRORS)
+    out["live_matches"] = len(evs)
+    return out
+
+
+
 # ---------- ranking w tle (single-flight + cache) ----------
 TTL = {"live": 180, "prematch": 600, "all": 180}
 JOBS = {}                             # klucz -> {"thread", "progress", "started"}
@@ -1898,7 +2184,7 @@ REFRESH_STATE = {"last": 0.0}
 
 def refresh_tick():
     """Jedno przejście odświeżacza: uruchamia przeliczenie przeterminowanych rankingów (bez czekania)."""
-    for fn in (lambda: get_ranking("all"), lambda: get_ranking("all", 3, *VIP_RULES["odds_range"]), get_worst, get_overs):
+    for fn in (lambda: get_ranking("all"), lambda: get_ranking("all", 3, *VIP_RULES["odds_range"]), get_worst, get_overs, get_overs_live):
         try: fn()
         except Exception as e: print("[refresh] %s: %s" % (type(e).__name__, e), file=sys.stderr)
     REFRESH_STATE["last"] = time.time()
@@ -2010,7 +2296,10 @@ class H(BaseHTTPRequestHandler):
                 if not d: return self.send(404, json.dumps({"error": "nie znaleziono typu"}), "application/json; charset=utf-8")
                 return self.send(200, json.dumps(d, ensure_ascii=False), "application/json; charset=utf-8")
             except Exception as e: return self.send(500, json.dumps({"error": str(e)}), "application/json")
-        if u.path == "/api/goal-overs":
+        if u.path == "/api/goal-overs-live":
+            try: return self.send(200, json.dumps(get_overs_live(), ensure_ascii=False), "application/json; charset=utf-8")
+            except Exception as e: return self.send(500, json.dumps({"error": str(e)}), "application/json")
+        if u.path in ("/api/goal-overs", "/api/goal-overs-pre"):
             try: return self.send(200, json.dumps(get_overs(), ensure_ascii=False), "application/json; charset=utf-8")
             except Exception as e: return self.send(500, json.dumps({"error": str(e)}), "application/json")
         if u.path == "/api/ranking":

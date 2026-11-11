@@ -1,5 +1,5 @@
 {
-  "generated_warsaw": "2026-11-11 16:13",
+  "generated_warsaw": "2026-11-11 16:27",
   "today_warsaw": "2026-11-11",
   "tomorrow_warsaw": "2026-11-12",
   "picks": [
@@ -21,7 +21,7 @@
       "play": "Over 0.5 gola w 2. połowie",
       "enter": "jeśli do przerwy 0:0 lub 1:0 (łącznie najwyżej 1 gol)",
       "why": "gdy do przerwy był najwyżej 1 gol, gol w 2. połowie padł w 23/23 ostatnich meczów obu drużyn",
-      "summary": "Zagraj over 0.5 gola w 2. połowie. Gol w 2. połowie padł w 100% spotkań tych drużyn (23/23). Szansa: ok. 96%. Kiedy wejść: jeśli do przerwy 0:0 lub 1:0 (łącznie najwyżej 1 gol).",
+      "summary": "Warto rozważyć over 0.5 gola w 2. połowie. Gol w 2. połowie padł w 23/23 meczach tych drużyn. Szansa: ok. 96%.",
       "chance": 0.9613,
       "chance_pct": 96,
       "frac": "23/23",
@@ -40,7 +40,14 @@
       "chance_kickoff_pct": null,
       "chance_min20_pct": null,
       "frac_min20": null,
-      "n_min20": null
+      "n_min20": null,
+      "odds": null,
+      "time_label": null,
+      "phase": null,
+      "period": null,
+      "frac_base": null,
+      "frac_cond": null,
+      "line": null
     },
     {
       "rank": 2,
@@ -60,7 +67,7 @@
       "play": "Over 0.5 gola w 2. połowie",
       "enter": "jeśli do przerwy 0:0 lub 1:0 (łącznie najwyżej 1 gol)",
       "why": "gdy do przerwy był najwyżej 1 gol, gol w 2. połowie padł w 17/17 ostatnich meczów obu drużyn",
-      "summary": "Zagraj over 0.5 gola w 2. połowie. Gol w 2. połowie padł w 100% spotkań tych drużyn (17/17). Szansa: ok. 96%. Kiedy wejść: jeśli do przerwy 0:0 lub 1:0 (łącznie najwyżej 1 gol).",
+      "summary": "Warto rozważyć over 0.5 gola w 2. połowie. Gol w 2. połowie padł w 17/17 meczach tych drużyn. Szansa: ok. 96%.",
       "chance": 0.9585,
       "chance_pct": 96,
       "frac": "17/17",
@@ -79,7 +86,14 @@
       "chance_kickoff_pct": null,
       "chance_min20_pct": null,
       "frac_min20": null,
-      "n_min20": null
+      "n_min20": null,
+      "odds": null,
+      "time_label": null,
+      "phase": null,
+      "period": null,
+      "frac_base": null,
+      "frac_cond": null,
+      "line": null
     },
     {
       "rank": 3,
@@ -99,7 +113,7 @@
       "play": "Over 0.5 gola w 2. połowie",
       "enter": "jeśli do przerwy 0:0 lub 1:0 (łącznie najwyżej 1 gol)",
       "why": "gdy do przerwy był najwyżej 1 gol, gol w 2. połowie padł w 25/26 ostatnich meczów obu drużyn",
-      "summary": "Zagraj over 0.5 gola w 2. połowie. Gol w 2. połowie padł w 96% spotkań tych drużyn (25/26). Szansa: ok. 95%. Kiedy wejść: jeśli do przerwy 0:0 lub 1:0 (łącznie najwyżej 1 gol).",
+      "summary": "Warto rozważyć over 0.5 gola w 2. połowie. Gol w 2. połowie padł w 25/26 meczach tych drużyn. Szansa: ok. 95%.",
       "chance": 0.9482,
       "chance_pct": 95,
       "frac": "25/26",
@@ -118,7 +132,14 @@
       "chance_kickoff_pct": null,
       "chance_min20_pct": null,
       "frac_min20": null,
-      "n_min20": null
+      "n_min20": null,
+      "odds": null,
+      "time_label": null,
+      "phase": null,
+      "period": null,
+      "frac_base": null,
+      "frac_cond": null,
+      "line": null
     },
     {
       "rank": 4,
@@ -138,7 +159,7 @@
       "play": "Over 0.5 gola w 2. połowie",
       "enter": "jeśli do przerwy 0:0 lub 1:0 (łącznie najwyżej 1 gol)",
       "why": "gdy do przerwy był najwyżej 1 gol, gol w 2. połowie padł w 20/21 ostatnich meczów obu drużyn",
-      "summary": "Zagraj over 0.5 gola w 2. połowie. Gol w 2. połowie padł w 95% spotkań tych drużyn (20/21). Szansa: ok. 95%. Kiedy wejść: jeśli do przerwy 0:0 lub 1:0 (łącznie najwyżej 1 gol).",
+      "summary": "Warto rozważyć over 0.5 gola w 2. połowie. Gol w 2. połowie padł w 20/21 meczach tych drużyn. Szansa: ok. 95%.",
       "chance": 0.9463,
       "chance_pct": 95,
       "frac": "20/21",
@@ -157,7 +178,14 @@
       "chance_kickoff_pct": null,
       "chance_min20_pct": null,
       "frac_min20": null,
-      "n_min20": null
+      "n_min20": null,
+      "odds": null,
+      "time_label": null,
+      "phase": null,
+      "period": null,
+      "frac_base": null,
+      "frac_cond": null,
+      "line": null
     },
     {
       "rank": 5,
@@ -177,7 +205,7 @@
       "play": "Over 0.5 gola w 2. połowie",
       "enter": "jeśli do przerwy 0:0 lub 1:0 (łącznie najwyżej 1 gol)",
       "why": "gdy do przerwy był najwyżej 1 gol, gol w 2. połowie padł w 27/28 ostatnich meczów obu drużyn",
-      "summary": "Zagraj over 0.5 gola w 2. połowie. Gol w 2. połowie padł w 96% spotkań tych drużyn (27/28). Szansa: ok. 94%. Kiedy wejść: jeśli do przerwy 0:0 lub 1:0 (łącznie najwyżej 1 gol).",
+      "summary": "Warto rozważyć over 0.5 gola w 2. połowie. Gol w 2. połowie padł w 27/28 meczach tych drużyn. Szansa: ok. 94%.",
       "chance": 0.9432,
       "chance_pct": 94,
       "frac": "27/28",
@@ -194,7 +222,14 @@
       "chance_kickoff_pct": null,
       "chance_min20_pct": null,
       "frac_min20": null,
-      "n_min20": null
+      "n_min20": null,
+      "odds": null,
+      "time_label": null,
+      "phase": null,
+      "period": null,
+      "frac_base": null,
+      "frac_cond": null,
+      "line": null
     },
     {
       "rank": 6,
@@ -214,7 +249,7 @@
       "play": "Over 0.5 gola w 2. połowie",
       "enter": "jeśli do przerwy 0:0 lub 1:0 (łącznie najwyżej 1 gol)",
       "why": "gdy do przerwy był najwyżej 1 gol, gol w 2. połowie padł w 18/18 ostatnich meczów obu drużyn",
-      "summary": "Zagraj over 0.5 gola w 2. połowie. Gol w 2. połowie padł w 100% spotkań tych drużyn (18/18). Szansa: ok. 93%. Kiedy wejść: jeśli do przerwy 0:0 lub 1:0 (łącznie najwyżej 1 gol).",
+      "summary": "Warto rozważyć over 0.5 gola w 2. połowie. Gol w 2. połowie padł w 18/18 meczach tych drużyn. Szansa: ok. 93%.",
       "chance": 0.9346,
       "chance_pct": 93,
       "frac": "18/18",
@@ -233,7 +268,14 @@
       "chance_kickoff_pct": null,
       "chance_min20_pct": null,
       "frac_min20": null,
-      "n_min20": null
+      "n_min20": null,
+      "odds": null,
+      "time_label": null,
+      "phase": null,
+      "period": null,
+      "frac_base": null,
+      "frac_cond": null,
+      "line": null
     },
     {
       "rank": 7,
@@ -253,7 +295,7 @@
       "play": "Over 0.5 gola w 2. połowie",
       "enter": "jeśli do przerwy 0:0 lub 1:0 (łącznie najwyżej 1 gol)",
       "why": "gdy do przerwy był najwyżej 1 gol, gol w 2. połowie padł w 24/26 ostatnich meczów obu drużyn",
-      "summary": "Zagraj over 0.5 gola w 2. połowie. Gol w 2. połowie padł w 92% spotkań tych drużyn (24/26). Szansa: ok. 93%. Kiedy wejść: jeśli do przerwy 0:0 lub 1:0 (łącznie najwyżej 1 gol).",
+      "summary": "Warto rozważyć over 0.5 gola w 2. połowie. Gol w 2. połowie padł w 24/26 meczach tych drużyn. Szansa: ok. 93%.",
       "chance": 0.9346,
       "chance_pct": 93,
       "frac": "24/26",
@@ -272,7 +314,14 @@
       "chance_kickoff_pct": null,
       "chance_min20_pct": null,
       "frac_min20": null,
-      "n_min20": null
+      "n_min20": null,
+      "odds": null,
+      "time_label": null,
+      "phase": null,
+      "period": null,
+      "frac_base": null,
+      "frac_cond": null,
+      "line": null
     },
     {
       "rank": 8,
@@ -292,7 +341,7 @@
       "play": "Over 0.5 gola w 2. połowie",
       "enter": "jeśli do przerwy 0:0 lub 1:0 (łącznie najwyżej 1 gol)",
       "why": "gdy do przerwy był najwyżej 1 gol, gol w 2. połowie padł w 27/28 ostatnich meczów obu drużyn",
-      "summary": "Zagraj over 0.5 gola w 2. połowie. Gol w 2. połowie padł w 96% spotkań tych drużyn (27/28). Szansa: ok. 93%. Kiedy wejść: jeśli do przerwy 0:0 lub 1:0 (łącznie najwyżej 1 gol).",
+      "summary": "Warto rozważyć over 0.5 gola w 2. połowie. Gol w 2. połowie padł w 27/28 meczach tych drużyn. Szansa: ok. 93%.",
       "chance": 0.9313,
       "chance_pct": 93,
       "frac": "27/28",
@@ -311,7 +360,14 @@
       "chance_kickoff_pct": null,
       "chance_min20_pct": null,
       "frac_min20": null,
-      "n_min20": null
+      "n_min20": null,
+      "odds": null,
+      "time_label": null,
+      "phase": null,
+      "period": null,
+      "frac_base": null,
+      "frac_cond": null,
+      "line": null
     },
     {
       "rank": 9,
@@ -331,7 +387,7 @@
       "play": "Over 0.5 gola w 2. połowie",
       "enter": "jeśli do przerwy 0:0 lub 1:0 (łącznie najwyżej 1 gol)",
       "why": "gdy do przerwy był najwyżej 1 gol, gol w 2. połowie padł w 23/24 ostatnich meczów obu drużyn",
-      "summary": "Zagraj over 0.5 gola w 2. połowie. Gol w 2. połowie padł w 96% spotkań tych drużyn (23/24). Szansa: ok. 90%. Kiedy wejść: jeśli do przerwy 0:0 lub 1:0 (łącznie najwyżej 1 gol).",
+      "summary": "Warto rozważyć over 0.5 gola w 2. połowie. Gol w 2. połowie padł w 23/24 meczach tych drużyn. Szansa: ok. 90%.",
       "chance": 0.8993,
       "chance_pct": 90,
       "frac": "23/24",
@@ -348,7 +404,14 @@
       "chance_kickoff_pct": null,
       "chance_min20_pct": null,
       "frac_min20": null,
-      "n_min20": null
+      "n_min20": null,
+      "odds": null,
+      "time_label": null,
+      "phase": null,
+      "period": null,
+      "frac_base": null,
+      "frac_cond": null,
+      "line": null
     },
     {
       "rank": 10,
@@ -368,7 +431,7 @@
       "play": "Over 0.5 gola w 2. połowie",
       "enter": "jeśli do przerwy 0:0 lub 1:0 (łącznie najwyżej 1 gol)",
       "why": "gdy do przerwy był najwyżej 1 gol, gol w 2. połowie padł w 25/28 ostatnich meczów obu drużyn",
-      "summary": "Zagraj over 0.5 gola w 2. połowie. Gol w 2. połowie padł w 89% spotkań tych drużyn (25/28). Szansa: ok. 89%. Kiedy wejść: jeśli do przerwy 0:0 lub 1:0 (łącznie najwyżej 1 gol).",
+      "summary": "Warto rozważyć over 0.5 gola w 2. połowie. Gol w 2. połowie padł w 25/28 meczach tych drużyn. Szansa: ok. 89%.",
       "chance": 0.8923,
       "chance_pct": 89,
       "frac": "25/28",
@@ -387,7 +450,14 @@
       "chance_kickoff_pct": null,
       "chance_min20_pct": null,
       "frac_min20": null,
-      "n_min20": null
+      "n_min20": null,
+      "odds": null,
+      "time_label": null,
+      "phase": null,
+      "period": null,
+      "frac_base": null,
+      "frac_cond": null,
+      "line": null
     }
   ],
   "n_picks": 10,
@@ -410,7 +480,7 @@
       "play": "Over 0.5 gola w 1. połowie",
       "enter": "na start meczu, przy 0:0; w 20. minucie przy 0:0 szansa spada do ok. 47% — nie czekać",
       "why": "gol w 1. połowie padł w 90% spotkań tych drużyn (27/30)",
-      "summary": "Zagraj over 0.5 gola w 1. połowie. Gol w 1. połowie padł w 90% spotkań tych drużyn (27/30). Szansa: ok. 86%. Kiedy wejść: na start meczu, przy 0:0; w 20. minucie przy 0:0 szansa spada do ok. 47% — nie czekać. Szansa na start ok. 86%; w 20. minucie przy 0:0 ok. 47% (6/12).",
+      "summary": "Warto rozważyć over 0.5 gola w 1. połowie. Gol w 1. połowie padł w 27/30 meczach tych drużyn. Przy 0:0 po 20. min w 6/12. Szansa: ok. 86%.",
       "chance": 0.8617,
       "chance_pct": 86,
       "frac": "27/30",
@@ -429,7 +499,14 @@
       "chance_kickoff_pct": 86,
       "chance_min20_pct": 47,
       "frac_min20": "6/12",
-      "n_min20": 12
+      "n_min20": 12,
+      "odds": null,
+      "time_label": null,
+      "phase": null,
+      "period": null,
+      "frac_base": null,
+      "frac_cond": null,
+      "line": null
     },
     {
       "rank": 2,
@@ -449,7 +526,7 @@
       "play": "Over 0.5 gola w 1. połowie",
       "enter": "na start meczu, przy 0:0; w 20. minucie przy 0:0 szansa spada do ok. 25% — nie czekać",
       "why": "gol w 1. połowie padł w 83% spotkań tych drużyn (25/30)",
-      "summary": "Zagraj over 0.5 gola w 1. połowie. Gol w 1. połowie padł w 83% spotkań tych drużyn (25/30). Szansa: ok. 85%. Kiedy wejść: na start meczu, przy 0:0; w 20. minucie przy 0:0 szansa spada do ok. 25% — nie czekać. Szansa na start ok. 85%; w 20. minucie przy 0:0 ok. 25% (2/10).",
+      "summary": "Warto rozważyć over 0.5 gola w 1. połowie. Gol w 1. połowie padł w 25/30 meczach tych drużyn. Przy 0:0 po 20. min w 2/10. Szansa: ok. 85%.",
       "chance": 0.8502,
       "chance_pct": 85,
       "frac": "25/30",
@@ -468,7 +545,14 @@
       "chance_kickoff_pct": 85,
       "chance_min20_pct": 25,
       "frac_min20": "2/10",
-      "n_min20": 10
+      "n_min20": 10,
+      "odds": null,
+      "time_label": null,
+      "phase": null,
+      "period": null,
+      "frac_base": null,
+      "frac_cond": null,
+      "line": null
     },
     {
       "rank": 3,
@@ -488,7 +572,7 @@
       "play": "Over 0.5 gola w 1. połowie",
       "enter": "do 20. minuty przy 0:0",
       "why": "gol w 1. połowie padł w 90% spotkań tych drużyn (27/30)",
-      "summary": "Zagraj over 0.5 gola w 1. połowie. Gol w 1. połowie padł w 90% spotkań tych drużyn (27/30). Szansa: ok. 84%. Kiedy wejść: do 20. minuty przy 0:0. Szansa na start ok. 84%; w 20. minucie przy 0:0 ok. 72% (13/17).",
+      "summary": "Warto rozważyć over 0.5 gola w 1. połowie. Gol w 1. połowie padł w 27/30 meczach tych drużyn. Przy 0:0 po 20. min w 13/17. Szansa: ok. 84%.",
       "chance": 0.8404,
       "chance_pct": 84,
       "frac": "27/30",
@@ -505,7 +589,14 @@
       "chance_kickoff_pct": 84,
       "chance_min20_pct": 72,
       "frac_min20": "13/17",
-      "n_min20": 17
+      "n_min20": 17,
+      "odds": null,
+      "time_label": null,
+      "phase": null,
+      "period": null,
+      "frac_base": null,
+      "frac_cond": null,
+      "line": null
     },
     {
       "rank": 4,
@@ -525,7 +616,7 @@
       "play": "Over 0.5 gola w 1. połowie",
       "enter": "na start meczu, przy 0:0; w 20. minucie przy 0:0 szansa spada do ok. 62% — nie czekać",
       "why": "gol w 1. połowie padł w 87% spotkań tych drużyn (26/30)",
-      "summary": "Zagraj over 0.5 gola w 1. połowie. Gol w 1. połowie padł w 87% spotkań tych drużyn (26/30). Szansa: ok. 83%. Kiedy wejść: na start meczu, przy 0:0; w 20. minucie przy 0:0 szansa spada do ok. 62% — nie czekać. Szansa na start ok. 83%; w 20. minucie przy 0:0 ok. 62% (9/15).",
+      "summary": "Warto rozważyć over 0.5 gola w 1. połowie. Gol w 1. połowie padł w 26/30 meczach tych drużyn. Przy 0:0 po 20. min w 9/15. Szansa: ok. 83%.",
       "chance": 0.8345,
       "chance_pct": 83,
       "frac": "26/30",
@@ -542,7 +633,14 @@
       "chance_kickoff_pct": 83,
       "chance_min20_pct": 62,
       "frac_min20": "9/15",
-      "n_min20": 15
+      "n_min20": 15,
+      "odds": null,
+      "time_label": null,
+      "phase": null,
+      "period": null,
+      "frac_base": null,
+      "frac_cond": null,
+      "line": null
     },
     {
       "rank": 5,
@@ -562,7 +660,7 @@
       "play": "Over 0.5 gola w 1. połowie",
       "enter": "na start meczu, przy 0:0; w 20. minucie przy 0:0 szansa spada do ok. 51% — nie czekać",
       "why": "gol w 1. połowie padł w 87% spotkań tych drużyn (26/30)",
-      "summary": "Zagraj over 0.5 gola w 1. połowie. Gol w 1. połowie padł w 87% spotkań tych drużyn (26/30). Szansa: ok. 83%. Kiedy wejść: na start meczu, przy 0:0; w 20. minucie przy 0:0 szansa spada do ok. 51% — nie czekać. Szansa na start ok. 83%; w 20. minucie przy 0:0 ok. 51% (4/8).",
+      "summary": "Warto rozważyć over 0.5 gola w 1. połowie. Gol w 1. połowie padł w 26/30 meczach tych drużyn. Przy 0:0 po 20. min w 4/8. Szansa: ok. 83%.",
       "chance": 0.8319,
       "chance_pct": 83,
       "frac": "26/30",
@@ -581,7 +679,14 @@
       "chance_kickoff_pct": 83,
       "chance_min20_pct": 51,
       "frac_min20": "4/8",
-      "n_min20": 8
+      "n_min20": 8,
+      "odds": null,
+      "time_label": null,
+      "phase": null,
+      "period": null,
+      "frac_base": null,
+      "frac_cond": null,
+      "line": null
     },
     {
       "rank": 6,
@@ -601,7 +706,7 @@
       "play": "Over 0.5 gola w 1. połowie",
       "enter": "na start meczu, przy 0:0; w 20. minucie przy 0:0 szansa spada do ok. 10% — nie czekać",
       "why": "gol w 1. połowie padł w 87% spotkań tych drużyn (26/30)",
-      "summary": "Zagraj over 0.5 gola w 1. połowie. Gol w 1. połowie padł w 87% spotkań tych drużyn (26/30). Szansa: ok. 82%. Kiedy wejść: na start meczu, przy 0:0; w 20. minucie przy 0:0 szansa spada do ok. 10% — nie czekać. Szansa na start ok. 82%; w 20. minucie przy 0:0 ok. 10% (1/23).",
+      "summary": "Warto rozważyć over 0.5 gola w 1. połowie. Gol w 1. połowie padł w 26/30 meczach tych drużyn. Przy 0:0 po 20. min w 1/23. Szansa: ok. 82%.",
       "chance": 0.8232,
       "chance_pct": 82,
       "frac": "26/30",
@@ -618,7 +723,14 @@
       "chance_kickoff_pct": 82,
       "chance_min20_pct": 10,
       "frac_min20": "1/23",
-      "n_min20": 23
+      "n_min20": 23,
+      "odds": null,
+      "time_label": null,
+      "phase": null,
+      "period": null,
+      "frac_base": null,
+      "frac_cond": null,
+      "line": null
     },
     {
       "rank": 7,
@@ -638,7 +750,7 @@
       "play": "Over 0.5 gola w 1. połowie",
       "enter": "na start meczu, przy 0:0; w 20. minucie przy 0:0 szansa spada do ok. 29% — nie czekać",
       "why": "gol w 1. połowie padł w 83% spotkań tych drużyn (25/30)",
-      "summary": "Zagraj over 0.5 gola w 1. połowie. Gol w 1. połowie padł w 83% spotkań tych drużyn (25/30). Szansa: ok. 82%. Kiedy wejść: na start meczu, przy 0:0; w 20. minucie przy 0:0 szansa spada do ok. 29% — nie czekać. Szansa na start ok. 82%; w 20. minucie przy 0:0 ok. 29% (5/22).",
+      "summary": "Warto rozważyć over 0.5 gola w 1. połowie. Gol w 1. połowie padł w 25/30 meczach tych drużyn. Przy 0:0 po 20. min w 5/22. Szansa: ok. 82%.",
       "chance": 0.8174,
       "chance_pct": 82,
       "frac": "25/30",
@@ -657,7 +769,14 @@
       "chance_kickoff_pct": 82,
       "chance_min20_pct": 29,
       "frac_min20": "5/22",
-      "n_min20": 22
+      "n_min20": 22,
+      "odds": null,
+      "time_label": null,
+      "phase": null,
+      "period": null,
+      "frac_base": null,
+      "frac_cond": null,
+      "line": null
     },
     {
       "rank": 8,
@@ -677,7 +796,7 @@
       "play": "Over 0.5 gola w 1. połowie",
       "enter": "na start meczu, przy 0:0; w 20. minucie przy 0:0 szansa spada do ok. 40% — nie czekać",
       "why": "gol w 1. połowie padł w 90% spotkań tych drużyn (27/30)",
-      "summary": "Zagraj over 0.5 gola w 1. połowie. Gol w 1. połowie padł w 90% spotkań tych drużyn (27/30). Szansa: ok. 82%. Kiedy wejść: na start meczu, przy 0:0; w 20. minucie przy 0:0 szansa spada do ok. 40% — nie czekać. Szansa na start ok. 82%; w 20. minucie przy 0:0 ok. 40% (8/20).",
+      "summary": "Warto rozważyć over 0.5 gola w 1. połowie. Gol w 1. połowie padł w 27/30 meczach tych drużyn. Przy 0:0 po 20. min w 8/20. Szansa: ok. 82%.",
       "chance": 0.8165,
       "chance_pct": 82,
       "frac": "27/30",
@@ -694,7 +813,14 @@
       "chance_kickoff_pct": 82,
       "chance_min20_pct": 40,
       "frac_min20": "8/20",
-      "n_min20": 20
+      "n_min20": 20,
+      "odds": null,
+      "time_label": null,
+      "phase": null,
+      "period": null,
+      "frac_base": null,
+      "frac_cond": null,
+      "line": null
     },
     {
       "rank": 9,
@@ -714,7 +840,7 @@
       "play": "Over 0.5 gola w 1. połowie",
       "enter": "na start meczu, przy 0:0; w 20. minucie przy 0:0 szansa spada do ok. 36% — nie czekać",
       "why": "gol w 1. połowie padł w 80% spotkań tych drużyn (24/30)",
-      "summary": "Zagraj over 0.5 gola w 1. połowie. Gol w 1. połowie padł w 80% spotkań tych drużyn (24/30). Szansa: ok. 81%. Kiedy wejść: na start meczu, przy 0:0; w 20. minucie przy 0:0 szansa spada do ok. 36% — nie czekać. Szansa na start ok. 81%; w 20. minucie przy 0:0 ok. 36% (5/14).",
+      "summary": "Warto rozważyć over 0.5 gola w 1. połowie. Gol w 1. połowie padł w 24/30 meczach tych drużyn. Przy 0:0 po 20. min w 5/14. Szansa: ok. 81%.",
       "chance": 0.8146,
       "chance_pct": 81,
       "frac": "24/30",
@@ -733,7 +859,14 @@
       "chance_kickoff_pct": 81,
       "chance_min20_pct": 36,
       "frac_min20": "5/14",
-      "n_min20": 14
+      "n_min20": 14,
+      "odds": null,
+      "time_label": null,
+      "phase": null,
+      "period": null,
+      "frac_base": null,
+      "frac_cond": null,
+      "line": null
     },
     {
       "rank": 10,
@@ -753,7 +886,7 @@
       "play": "Over 0.5 gola w 1. połowie",
       "enter": "do 15. minuty przy 0:0",
       "why": "gol w 1. połowie padł w 87% spotkań tych drużyn (26/30)",
-      "summary": "Zagraj over 0.5 gola w 1. połowie. Gol w 1. połowie padł w 87% spotkań tych drużyn (26/30). Szansa: ok. 81%. Kiedy wejść: do 15. minuty przy 0:0. Szansa na start ok. 81%; w 20. minucie przy 0:0 ok. 57% (7/11).",
+      "summary": "Warto rozważyć over 0.5 gola w 1. połowie. Gol w 1. połowie padł w 26/30 meczach tych drużyn. Przy 0:0 po 20. min w 7/11. Szansa: ok. 81%.",
       "chance": 0.8137,
       "chance_pct": 81,
       "frac": "26/30",
@@ -770,7 +903,14 @@
       "chance_kickoff_pct": 81,
       "chance_min20_pct": 57,
       "frac_min20": "7/11",
-      "n_min20": 11
+      "n_min20": 11,
+      "odds": null,
+      "time_label": null,
+      "phase": null,
+      "period": null,
+      "frac_base": null,
+      "frac_cond": null,
+      "line": null
     }
   ],
   "n_picks_1h": 10,
@@ -782,6 +922,6 @@
     "min_n": 8,
     "p_min": 0.7
   },
-  "rule": "Szansa = 55% częstości z ostatnich meczów obu drużyn po wygładzeniu Laplace’a (Beta(1,1): (k+1)/(n+2)) oraz 45% rozkładu Poissona ze średniej liczby goli w tym okresie (1. połowa, 2. połowa, cały mecz albo 76–90+). Gdy jest co najmniej 8 meczów z tym samym stanem (do przerwy albo 0:0 w danej minucie 1. połowy), liczona jest szansa warunkowa. Dla over 0.5 w 1. połowie podawana jest szansa na start i — o ile próba pozwala — w 20. minucie przy 0:0, z rozkładu minut pierwszych goli. Podawany jest procent i ułamek źródłowy k/n. To częstość + model, nie gwarancja.",
-  "note": "Dane startowe z oficjalnych minut (zrzut 11.11.2026, 16:13 czasu polskiego). Tylko mocne schematy (min. 8 meczów, szansa łączona ≥ 70%). Dla 1. połowy szansa na start i — gdy próba pozwala — w 20. minucie przy 0:0. Forma, nie gwarancja. Nic nie jest stawiane."
+  "rule": "Szansa = 55% częstości z ostatnich meczów obu drużyn po wygładzeniu Laplace’a (Beta(1,1): (k+1)/(n+2)) oraz 45% rozkładu Poissona ze średniej liczby goli w tym okresie (1. połowa, 2. połowa, cały mecz albo 76–90+). Gdy jest co najmniej 8 meczów z tym samym stanem (do przerwy albo 0:0 w danej minucie 1. połowy), liczona jest szansa warunkowa. Dla over 0.5 w 1. połowie podawana jest szansa na start i — o ile próba pozwala — w 20. minucie przy 0:0, z rozkładu minut pierwszych goli. W zakładce live szansa jest liczona od aktualnej minuty i wyniku (gol w pozostałym czasie danej połowy albo over aktualnej sumy + 0.5). Podawany jest procent i ułamek źródłowy k/n. To częstość + model, nie gwarancja.",
+  "note": "Dane startowe z oficjalnych minut (zrzut 11.11.2026, czas polski). Tylko mocne schematy przedmeczowe (min. 8 meczów, szansa ≥ 70%). Forma, nie gwarancja. Nic nie jest stawiane."
 }

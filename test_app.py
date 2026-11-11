@@ -1040,15 +1040,113 @@ class TGoalOvers(unittest.TestCase):
         dead = g.pick_for_match(h, a, {"mode":"live","minutes":20,"score":"1:0"})
         self.assertTrue(dead is None or dead["key"] != "over05_1h")
 
+    def test_live_1h_at_20_00_uses_remaining_sample(self):
+        import goal_overs as g
+        # 10+10 meczów: pierwszy gol w 1H w 30. minucie
+        ms = [self._game("h", True, [("home", 30)]) for _ in range(10)]
+        h = g.team_profile("h", ms, name="Alfa")
+        a = g.team_profile("a", ms, name="Beta")
+        card = g.pick_live_for_match(h, a, {"minutes": 20, "score": "0:0", "period": "1P"})
+        self.assertIsNotNone(card)
+        self.assertEqual(card["key"], "over05_1h")
+        self.assertEqual(card["frac"], "20/20")
+        self.assertIn("20", card["time_label"])
+        self.assertIn("0:0", card["summary"])
+        self.assertIn("Szansa:", card["summary"])
+        self.assertIn("27/30" if False else "20/20", card["summary"])  # ułamek warunkowy
+        self.assertRegex(card["summary"], r"przy 0:0 po 20\. min w 20/20")
+
+    def test_live_skips_1h_when_goal_already_scored(self):
+        import goal_overs as g
+        ms = [self._game("h", True, [("home", 30)]) for _ in range(10)]
+        h = g.team_profile("h", ms, name="Alfa")
+        a = g.team_profile("a", ms, name="Beta")
+        # 1H 1:0 — typ over 0.5 1H już wszedł
+        card = g.pick_live_for_match(h, a, {"minutes": 20, "score": "1:0", "period": "1P",
+            "periods": [{"homeTeamScore": 1, "awayTeamScore": 0, "type": "FIRST_HALF", "num": 1}]})
+        self.assertTrue(card is None or card["key"] != "over05_1h")
+
+    def test_live_2h_at_ht_00(self):
+        import goal_overs as g
+        ms = [self._game("h", True, [("home", 60)]) for _ in range(10)]
+        h = g.team_profile("h", ms, name="Alfa")
+        a = g.team_profile("a", ms, name="Beta")
+        card = g.pick_live_for_match(h, a, {"minutes": 45, "score": "0:0", "period": "HT",
+            "periods": [{"homeTeamScore": 0, "awayTeamScore": 0, "type": "RegularPeriod", "num": 1}]})
+        self.assertIsNotNone(card)
+        self.assertEqual(card["key"], "over05_2h")
+        self.assertIn("przerwa", card["time_label"])
+        self.assertIn("Szansa:", card["summary"])
+        self.assertEqual(card["frac"], "20/20")
+
+    def test_live_2h_skips_when_2h_goal_already_in(self):
+        import goal_overs as g
+        # historia: często gol po 70., więc over remaining po 60. przy już 1 golu w 2H -> over next
+        ms = [self._game("h", True, [("home", 80)]) for _ in range(10)]
+        h = g.team_profile("h", ms, name="Alfa")
+        a = g.team_profile("a", ms, name="Beta")
+        card = g.pick_live_for_match(h, a, {"minutes": 60, "score": "1:0", "period": "2P",
+            "periods": [
+                {"homeTeamScore": 0, "awayTeamScore": 0, "type": "FIRST_HALF", "num": 1},
+                {"homeTeamScore": 1, "awayTeamScore": 0, "type": "SECOND_HALF", "num": 2},
+            ]})
+        self.assertTrue(card is None or card["key"] != "over05_2h")
+        if card:
+            self.assertEqual(card["key"], "over_next")
+            self.assertIn("1,5", card["play"].replace(".", ","))
+
+    def test_pre_summary_over15_and_btts(self):
+        import goal_overs as g
+        # 10/10 meczów z 3 golami, obie strony strzelają
+        ms = [self._game("h", True, [("home", 20), ("away", 50), ("home", 70)]) for _ in range(10)]
+        h = g.team_profile("h", ms, name="Alfa")
+        a = g.team_profile("a", ms, name="Beta")
+        card = g.pick_pre_for_match(h, a, {"start_warsaw": "19:00", "home": "Alfa", "away": "Beta"})
+        self.assertIsNotNone(card)
+        self.assertIn(card["key"], ("over15", "over25", "over05_1h", "over05_2h", "btts"))
+        self.assertTrue(card["summary"].startswith("Warto rozważyć"))
+        self.assertIn("Szansa:", card["summary"])
+        self.assertRegex(card["summary"], r"\d+/\d+")
+        # BTTS sam w sobie liczy się uczciwie
+        b = [c for c in g.qualifying_cards(h, a, {}) if c["key"] == "btts"]
+        self.assertTrue(b)
+        self.assertEqual(b[0]["frac"], "20/20")
+
+    def test_parse_over_odds_ignores_combos(self):
+        odds = [
+            {"marketName": "Liczba goli", "name": "powyżej 1.5", "price": 1.22, "status": "active"},
+            {"marketName": "Liczba goli", "name": "powyżej 2.5", "price": 1.73, "status": "active"},
+            {"marketName": "Mecz & liczba goli (1.5)", "name": "powyżej 1.5", "price": 3.0, "status": "active"},
+            {"marketName": "Obie drużyny strzelą", "name": "tak", "price": 1.68, "status": "active"},
+            {"marketName": "1.połowa - liczba goli", "name": "powyżej 0.5", "price": 1.32, "status": "block"},
+        ]
+        got = app.parse_over_odds(odds)
+        self.assertEqual(got["over15"], 1.22)
+        self.assertEqual(got["over25"], 1.73)
+        self.assertEqual(got["btts"], 1.68)
+        self.assertNotIn("over05_1h", got)
+
+    def test_parse_live_state_periods(self):
+        import goal_overs as g
+        st = g.parse_live_state({"minutes": 63, "score": "3:0", "period": "2P",
+            "periods": [
+                {"homeTeamScore": "2", "awayTeamScore": "0", "type": "RegularPeriod", "num": 1},
+                {"homeTeamScore": "1", "awayTeamScore": "0", "type": "RegularPeriod", "num": 2},
+            ]})
+        self.assertEqual(st["phase"], "2h")
+        self.assertEqual(st["goals_1h"], 2)
+        self.assertEqual(st["goals_2h"], 1)
+        self.assertEqual(st["tot"], 3)
+
     def test_html_has_overs_tab(self):
-        self.assertIn("Overy goli", app.HTML)
         self.assertIn("#overy", app.HTML)
-        self.assertIn("/api/goal-overs", app.HTML)
-        self.assertIn("Najpewniejsze overy dnia", app.HTML)
+        self.assertIn("#overy-pre", app.HTML)
+        self.assertIn("/api/goal-overs-live", app.HTML)
+        self.assertIn("/api/goal-overs-pre", app.HTML)
+        self.assertIn("Overy LIVE", app.HTML)
+        self.assertIn("Overy przedmeczowe", app.HTML)
         self.assertIn("Szansa:", app.HTML)
         self.assertIn("Ranking 1–10", app.HTML)
-        self.assertIn("Ranking 1. połowy", app.HTML)
-        self.assertIn("1. połowy", app.HTML)
 
     def test_seed_payload_has_chances(self):
         seed = app._seed_payload(now_ts=1_794_400_000)  # 11.11.2026 rano UTC
