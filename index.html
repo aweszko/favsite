@@ -95,6 +95,9 @@ input:focus,button:focus-visible{outline:2px solid var(--g);outline-offset:1px}.
 .nf{margin:10px 0 16px;padding:12px;border:1px solid #2f2710;border-radius:14px;background:#14110a}.nf h3{margin:0 0 8px;font-size:13px;color:var(--g3)}.nf ol{margin:0;padding-left:18px;font-size:12px;color:var(--s)}.nf li{margin:3px 0}.nf b{color:var(--g3)}.nc{border:1px solid #3a3014;border-radius:16px;padding:14px;margin:0 0 12px;background:linear-gradient(180deg,#1a150c,#120e08)}.nc.hot{border-color:#c9a227;box-shadow:0 0 0 1px #c9a22744}.nc .tip{font-size:16px;font-weight:800;color:var(--g3);margin:6px 0 10px}.nc .meta{font-size:12px;color:var(--s);display:flex;flex-wrap:wrap;gap:8px}.nc .kv{display:grid;grid-template-columns:repeat(auto-fit,minmax(90px,1fr));gap:8px;margin-top:10px}.nc .kv b{display:block;font-size:16px;color:var(--g)}.nc .kv small{color:var(--s)}
 .oc-rank{border:1px solid #3a3014;border-radius:12px;padding:10px 14px;margin:0 12px 8px;background:#120e08;line-height:1.45;font-size:14px}
 .oc-rank b{color:var(--g)}
+.oc-rank.dim{opacity:.58;color:#9a9178;border-color:#2a2516}
+.oc-rank.dim b{color:#8a8068}
+.oc.dim{opacity:.58;border-color:#2a2516}
 .oc{border:1px solid #3a3014;border-radius:16px;padding:14px;margin:0 12px 12px;background:linear-gradient(180deg,#1a150c,#120e08)}
 .oc.hot{border-color:#c9a227;box-shadow:0 0 0 1px #c9a22744}
 .oc .oh{display:flex;justify-content:space-between;align-items:flex-start;gap:10px}
@@ -333,18 +336,21 @@ function oversCard(c, live){
 <div class="row"><b>Szansa:</b> ok. ${c.chance_pct??'–'}% · ułamek ${esc(c.frac_cond||c.frac||'–')} · częstość wygładzona ${emp} · Poisson ${poi}${c.conditional?' · szansa warunkowa':''}</div>
 ${odds}${min20}${warn}</div>`;
 }
-function oversRankLine(c){
+function oversRankLine(c, dim){
  const sum=c.summary||((c.home||'')+' – '+(c.away||'')+(c.score?', '+c.score:'')+(c.time_label?', '+c.time_label:'')+'. Zagraj '+(c.play||'')+'. Szansa: ok. '+(c.chance_pct??'–')+'%. '+(c.why||''));
- return '<div class="oc-rank"><b>#'+c.rank+'.</b> '+esc(sum)+'</div>';
+ const label=dim?'':'<b>#'+c.rank+'.</b> ';
+ return '<div class="oc-rank'+(dim?' dim':'')+'">'+label+esc(sum)+'</div>';
 }
 function drawOversInto(d, mount, live){
  if(!d)return;
  const box=$(mount);
- if(d.status=='computing'&&!(d.picks&&d.picks.length)){const p=d.progress||{};box.innerHTML='<div class="empty">Liczą się overy w tle… ('+(p.done||0)+'/'+(p.total||'?')+'). Pierwsze liczenie może potrwać chwilę — strona nie blokuje się.</div>';return}
+ if(d.status=='computing'&&!(d.picks&&d.picks.length)&&!(d.others&&d.others.length)){const p=d.progress||{};box.innerHTML='<div class="empty">Liczą się overy w tle… ('+(p.done||0)+'/'+(p.total||'?')+'). Pierwsze liczenie może potrwać chwilę — strona nie blokuje się.</div>';return}
  const P=d.picks||[];
+ const R=live?(d.others||[]):[];
  let h='<div class="nf"><h3>Ranking 1–10</h3></div>';
- if(!P.length)h+='<div class="empty">'+(live?'Teraz nie ma wystarczająco mocnych typów na meczach LIVE (min. 8 meczów historii i szansa ≥ 70%), albo nie ma meczów w trakcie.':'Brak wystarczająco mocnych typów przedmeczowych (min. 8 meczów i szansa ≥ 70%).')+'</div>';
- else h+=P.map(oversRankLine).join('');
+ if(!P.length)h+='<div class="empty">'+(live?'Teraz żaden mecz LIVE nie ma szansy ≥ 70% na gola w bieżącej połowie (próba min. 8). Niżej widać pozostałe, jeśli są policzone.':'Brak wystarczająco mocnych typów przedmeczowych (min. 8 meczów i szansa ≥ 70%).')+'</div>';
+ else h+=P.map(c=>oversRankLine(c,false)).join('');
+ if(live&&R.length){h+='<div class="nf" style="margin-top:18px"><h3>Pozostałe mecze live</h3></div>';h+=R.map(c=>oversRankLine(c,true)).join('');}
  if(P.length){h+='<div class="nf" style="margin-top:18px"><h3>Karty</h3></div>';h+=P.map(c=>oversCard(c,live)).join('');}
  h+=`<div class="hfoot">${esc(d.note||'')}<br>Meczów: ${(d.footer&&d.footer.matches)!=null?d.footer.matches:(d.live_matches||0)} · za słabe: ${(d.footer&&d.footer.too_weak)||0} · bez danych: ${(d.footer&&d.footer.without_stats)||0}<details style="margin-top:6px;text-align:left"><summary>Jak liczona jest szansa</summary>${esc(d.rule||'')}</details></div>`;
  box.innerHTML=h;

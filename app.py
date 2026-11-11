@@ -2046,20 +2046,28 @@ def _publish_live_overs(evs, partial=False):
         skipped["done"] += 1
         if card:
             cards.append(card)
+            if not card.get("qualified"):
+                skipped["thin"] += 1
         else:
             skipped["thin"] += 1
-    picks = [goal_overs.public_card(c) for c in goal_overs.rank_picks(cards, limit=goal_overs.MAX_PICKS)]
+    strong = [c for c in cards if c.get("qualified")]
+    rest = [c for c in cards if not c.get("qualified")]
+    picks = [goal_overs.public_card(c) for c in goal_overs.rank_picks(strong, limit=goal_overs.MAX_PICKS)]
+    rest_sorted = goal_overs.rank_picks(rest, limit=50)
+    others = [goal_overs.public_card(c) for c in rest_sorted]
+    # rank_picks nadaje rank 1.. też pozostałym — zostaw jako kolejność, bez mieszania z czołówką
     now = datetime.now(timezone.utc)
     res = {
         "generated_warsaw": to_warsaw(now).strftime("%Y-%m-%d %H:%M:%S"),
         "picks": picks, "n_picks": len(picks),
+        "others": others, "n_others": len(others),
         "source": "live", "partial": partial, "mode": "live",
         "footer": {"matches": len(evs), "checked": skipped["done"],
                    "without_stats": skipped["nostats"] + skipped["nobr"],
                    "too_weak": skipped["thin"], "min_n": goal_overs.MIN_N,
                    "p_min": goal_overs.P_MIN},
         "rule": goal_overs.CHANCE_RULE,
-        "note": "Tylko mecze LIVE. Szansa od aktualnej minuty i wyniku, z minut goli obu drużyn (min. 8 meczów, szansa ≥ 70%). Forma, nie gwarancja. Nic nie jest stawiane.",
+        "note": "Tylko mecze LIVE. W 1. połowie szansa dotyczy wyłącznie gola do przerwy, w 2. połowie (i o przerwie) — wyłącznie gola w 2. połowie. Ranking: min. 8 meczów i szansa ≥ 70%. Forma, nie gwarancja. Nic nie jest stawiane.",
     }
     with LOCK:
         LIVE_OVERS_STATE.update(res=res, t=time.time())
