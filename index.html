@@ -47,7 +47,7 @@ input{background:var(--c);color:var(--t);border:1px solid var(--l);border-radius
 input:focus,button:focus-visible{outline:2px solid var(--g);outline-offset:1px}.top,#st,footer{max-width:900px;margin-left:auto;margin-right:auto}
 @media(max-width:480px){.brand img{height:40px}h1{font-size:17px}}
 @media(min-width:900px){.brand img{height:60px}#list,#rank{max-width:900px;margin:0 auto}.main,.tabs,.f{max-width:900px;margin-left:auto;margin-right:auto}}
-#overs-live,#overs-pre,#overs-other{max-width:520px;margin:0 auto;overflow-x:hidden;padding-bottom:28px}
+#kupon,#overs-live,#overs-pre,#overs-other{max-width:520px;margin:0 auto;overflow-x:hidden;padding-bottom:28px}
 .vnote{margin:8px 8px 0;padding:8px 12px;border:1px solid #5c4a1a;border-left:3px solid var(--b2);border-radius:10px;background:#16130b;color:var(--g3);font-size:12px}
 .ck{width:100%;border-collapse:collapse;font-size:12px}.ck td{padding:4px 8px;border-top:1px solid #20232a}.ck td.n{color:var(--sv)}.ck td.r{text-align:right;white-space:nowrap}
 .ok{color:#5fd38a;font-weight:700}.no{color:#ff6b6b;font-weight:700}.vt{border-radius:8px;padding:1px 8px;font-weight:700;font-size:11px;background:var(--b);color:var(--g3)}
@@ -149,12 +149,28 @@ input:focus,button:focus-visible{outline:2px solid var(--g);outline-offset:1px}.
 .lt td:not(:first-child){text-align:center;white-space:nowrap}
 .oc{border:1px solid #3a3014;border-radius:16px;padding:14px;margin:0 10px 12px;background:linear-gradient(180deg,#1a150c,#120e08)}
 .oc.hot{border-color:#c9a227;box-shadow:0 0 0 1px #c9a22744}
+
+.kp{border:1px solid #c9a227;border-radius:16px;padding:14px;margin:0 10px 14px;background:linear-gradient(180deg,#1a150c,#120e08);box-shadow:0 0 0 1px #c9a22733}
+.kp.alt{border-color:#3a3014;box-shadow:none}
+.kp-h{display:flex;align-items:baseline;justify-content:space-between;gap:8px;flex-wrap:wrap;margin-bottom:8px}
+.kp-h h3{margin:0;font-size:15px;color:var(--g3);letter-spacing:.04em;text-transform:uppercase}
+.kp-h .n{font-size:12px;color:var(--s);font-weight:600}
+.kp-sum{display:flex;align-items:flex-end;justify-content:space-between;gap:10px;margin:8px 0 6px}
+.kp-sum .big{font-size:28px;font-weight:800;color:var(--g);letter-spacing:-.03em;line-height:1}
+.kp-sum .big small{display:block;font-size:10px;color:var(--s);font-weight:600;letter-spacing:.04em;margin-top:3px;text-transform:uppercase}
+.kp-note{font-size:12px;color:var(--s);margin:8px 0 12px;line-height:1.4}
+.kp-leg{border-top:1px solid #2a2310;padding:10px 0 2px}
+.kp-leg .nm{font-size:15px;font-weight:700;color:var(--g3);overflow-wrap:anywhere}
+.kp-leg .meta{font-size:12px;color:var(--s);margin:2px 0 6px}
+.kp-leg .play{font-size:14px;font-weight:700;color:var(--t);margin:0 0 6px}
+.kp-leg .row{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
 </style></head><body>
 <header><div class="top"><div class="brand"><img src="/icon.png" alt="Triumfator – herb" width="48" height="48"><div class="tx"><h1>Triumfator</h1><div class="sub">Porównywarka statystyk piłkarskich</div></div></div><span id="clk" class="tm"></span></div>
-<div class="main"><button data-v="list" class="on">Mecze</button><button data-v="rank">Ranking</button><button data-v="vip">VIP</button><button data-v="pro" class="pb">Pewniaki PRO</button><button data-v="worst">Dziurawe obrony</button><button data-v="next">Następny gol</button><button data-v="overs-live">Overy LIVE</button><button data-v="overs-pre">Overy przedmeczowe</button><button data-v="overs-other">Overy: tenis, siatka, kosz, hokej</button></div>
+<div class="main"><button data-v="kupon" class="on">Gotowy kupon</button><button data-v="list">Mecze</button><button data-v="rank">Ranking</button><button data-v="vip">VIP</button><button data-v="pro" class="pb">Pewniaki PRO</button><button data-v="worst">Dziurawe obrony</button><button data-v="next">Następny gol</button><button data-v="overs-live">Overy LIVE</button><button data-v="overs-pre">Overy przedmeczowe</button><button data-v="overs-other">Overy: tenis, siatka, kosz, hokej</button></div>
 <div class="tabs" id="tabs"></div></header>
 <div id="st">Ładowanie…</div>
-<div id="list"></div>
+<div id="kupon"><div class="vnote">Gotowy kupon · 2 albo 3 typy TAK z Overy · każdy mecz raz · kurs kuponu i szansa to iloczyny (mecze liczę jak niezależne — uproszczenie) · <b>forma, nie gwarancja</b></div><div id="kp"></div></div>
+<div id="list" hidden></div>
 <div id="rank" hidden>
 <div class="f"><label>min. meczów<input id="mg" type="number" min="0" max="5" value="3"></label>
 <label>kurs od<input id="omin" type="number" step="0.05" value="1.20" autocomplete="off" inputmode="decimal"></label>
@@ -169,7 +185,7 @@ input:focus,button:focus-visible{outline:2px solid var(--g);outline-offset:1px}.
 <div id="overs-other" hidden><div class="vnote">Overy: tenis, siatka, kosz, hokej · live i przed meczem · każdy mecz raz · typuję przy kursie ok. 1,30 albo wyższym · bez historii (mniej niż 8 meczów) nie pokazuję · stan z godziny Superbet · <b>forma, nie gwarancja</b></div><div id="opo"></div></div>
 <footer>Źródła: Superbet PL (oferta, kursy 1X2), Sportradar (statystyki strzałów). Godziny: Europe/Warsaw. Brak danych = „brak danych”, nic nie jest szacowane.</footer>
 <script>
-const $=s=>document.querySelector(s);let view='list',tab='live',rmode='all',M=null,R=null,open={};
+const $=s=>document.querySelector(s);let view='kupon',tab='live',rmode='all',M=null,R=null,open={};
 const DN=['niedz.','pon.','wt.','śr.','czw.','pt.','sob.'];
 const esc=s=>String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 const f=(x,d=2)=>x==null?'–':Number(x).toFixed(d).replace('.',',');
@@ -177,7 +193,7 @@ function addDay(s,n){const d=new Date(s+'T12:00:00Z');d.setUTCDate(d.getUTCDate(
 function listTabs(){if(!M)return[];const t=M.today_warsaw,now=M.now_ts,L=M.matches,pre=L.filter(m=>m.mode!='live');
 const T=[['live','Live',L.filter(m=>m.mode=='live')],['h1','Za 1 godz.',pre.filter(m=>m.ts-now<=36e5)],['h3','Za 3 godz.',pre.filter(m=>m.ts-now<=108e5)],['d0','Dziś',pre.filter(m=>m.day_warsaw==t)],['d1','Jutro',pre.filter(m=>m.day_warsaw==addDay(t,1))]];
 for(let i=2;i<7;i++){const d=addDay(t,i),dd=new Date(d+'T12:00:00Z');T.push(['d'+i,DN[dd.getUTCDay()]+' '+d.slice(8)+'.'+d.slice(5,7),pre.filter(m=>m.day_warsaw==d)])}return T}
-function drawTabs(){const el=$('#tabs');if(view=='vip'||view=='pro'){el.innerHTML='';return}if(view=='worst'||view=='next'||view=='overs-live'||view=='overs-pre'||view=='overs-other'){el.innerHTML='';return}if(view=='list'){el.innerHTML=listTabs().map(([k,n,a])=>`<button data-t="${k}" class="${k==tab?'on':''}">${n}<span class="cnt">${a.length}</span></button>`).join('')}
+function drawTabs(){const el=$('#tabs');if(view=='vip'||view=='pro'){el.innerHTML='';return}if(view=='kupon'||view=='worst'||view=='next'||view=='overs-live'||view=='overs-pre'||view=='overs-other'){el.innerHTML='';return}if(view=='list'){el.innerHTML=listTabs().map(([k,n,a])=>`<button data-t="${k}" class="${k==tab?'on':''}">${n}<span class="cnt">${a.length}</span></button>`).join('')}
 else el.innerHTML=[['live','Live'],['prematch','Przedmeczowe (dziś)'],['all','Wszystkie']].map(([k,n])=>`<button data-r="${k}" class="${k==rmode?'on':''}">${n}</button>`).join('');
 el.querySelectorAll('[data-t]').forEach(b=>b.onclick=()=>{tab=b.dataset.t;drawTabs();drawList();scrollTo(0,0)});
 el.querySelectorAll('[data-r]').forEach(b=>b.onclick=()=>{rmode=b.dataset.r;drawTabs();loadRank()})}
@@ -218,7 +234,7 @@ let rt=null;async function loadRank(){clearTimeout(rt);if(view=='rank'&&(!R||R.s
 const q=new URLSearchParams({mode:rmode,min_games:$('#mg').value,odds_min:$('#omin').value.replace(',','.'),odds_max:$('#omax').value.replace(',','.')});
 try{R=await (await fetch('/api/ranking?'+q)).json();drawRank();if(R.status=='computing'&&view=='rank')rt=setTimeout(loadRank,4000)}catch(e){$('#st').innerHTML='<span class="err">Błąd: '+esc(e)+'</span>';rt=setTimeout(loadRank,5000)}}
 document.querySelectorAll('[data-v]').forEach(b=>b.onclick=()=>{view=b.dataset.v;document.querySelectorAll('[data-v]').forEach(x=>x.classList.toggle('on',x==b));
-$('#list').hidden=view!='list';$('#rank').hidden=view!='rank';$('#vip').hidden=view!='vip';$('#pro').hidden=view!='pro';$('#worst').hidden=view!='worst';$('#next').hidden=view!='next';$('#overs-live').hidden=view!='overs-live';$('#overs-pre').hidden=view!='overs-pre';$('#overs-other').hidden=view!='overs-other';drawTabs();if(view=='worst'||view=='next'){W?(view=='worst'?drawWorst():drawNext()):0;loadWorst()}else if(view=='overs-live'){OL?drawOversLive():($('#st').textContent='Ładuję Overy LIVE…');loadOversLive()}else if(view=='overs-pre'){OP?drawOversPre():($('#st').textContent='Ładuję Overy przedmeczowe…');loadOversPre()}else if(view=='overs-other'){OI?drawOversOther():($('#st').textContent='Ładuję overy…');loadOversOther()}else if(view=='pro'){P?drawPro():0;loadPro()}else if(view=='rank'){R?drawRank():loadRank()}else if(view=='vip'){V?drawVip():0;loadVip()}else if(M)status(M)});
+$('#kupon').hidden=view!='kupon';$('#list').hidden=view!='list';$('#rank').hidden=view!='rank';$('#vip').hidden=view!='vip';$('#pro').hidden=view!='pro';$('#worst').hidden=view!='worst';$('#next').hidden=view!='next';$('#overs-live').hidden=view!='overs-live';$('#overs-pre').hidden=view!='overs-pre';$('#overs-other').hidden=view!='overs-other';drawTabs();if(view=='kupon'){OK?drawKupon():($('#st').textContent='Ładuję gotowy kupon…');loadKupon()}else if(view=='worst'||view=='next'){W?(view=='worst'?drawWorst():drawNext()):0;loadWorst()}else if(view=='overs-live'){OL?drawOversLive():($('#st').textContent='Ładuję Overy LIVE…');loadOversLive()}else if(view=='overs-pre'){OP?drawOversPre():($('#st').textContent='Ładuję Overy przedmeczowe…');loadOversPre()}else if(view=='overs-other'){OI?drawOversOther():($('#st').textContent='Ładuję overy…');loadOversOther()}else if(view=='pro'){P?drawPro():0;loadPro()}else if(view=='rank'){R?drawRank():loadRank()}else if(view=='vip'){V?drawVip():0;loadVip()}else if(M)status(M)});
 ['#mg','#omin','#omax'].forEach(s=>$(s).onchange=loadRank);
 setInterval(()=>{$('#clk').textContent=new Date().toLocaleTimeString('pl-PL',{timeZone:'Europe/Warsaw',hour:'2-digit',minute:'2-digit'})},1000);
 if(location.hash=='#najslabsi'||location.hash=='#dziurawe')document.querySelector('[data-v=worst]').click();
@@ -229,7 +245,10 @@ if(location.hash=='#ranking')document.querySelector('[data-v=rank]').click();
 if(location.hash=='#overy'||location.hash=='#overy-live'||location.hash=='#overy-goli'||location.hash=='#gole')document.querySelector('[data-v=overs-live]').click();
 if(location.hash=='#overy-pre'||location.hash=='#overy-przedmeczowe')document.querySelector('[data-v=overs-pre]').click();
 if(location.hash=='#overy-inne'||location.hash=='#overy-inne-sporty'||location.hash=='#overy-tenis'||location.hash=='#overy-siatka'||location.hash=='#overy-kosz'||location.hash=='#overy-hokej')document.querySelector('[data-v=overs-other]').click();
-loadList();setInterval(()=>view=='list'?loadList():view=='rank'?loadRank():0,60000);
+if(location.hash=='#mecze'||location.hash=='#list'||location.hash=='#lista')document.querySelector('[data-v=list]').click();
+if(location.hash=='#kupon'||location.hash=='#gotowy-kupon'||location.hash=='#gotowykupon')document.querySelector('[data-v=kupon]').click();
+if(view=='kupon')loadKupon();
+loadList();setInterval(()=>view=='list'?loadList():view=='rank'?loadRank():view=='kupon'?loadKupon():0,30000);
 let V=null,vt=null;
 const fv=x=>x==null?'–':typeof x=='number'?f(x,x%1?2:0):esc(x);
 function vcard(r){const when=r.vip_type=='live'?`<span style="color:#ff5c75">● ${r.minutes!=null?esc(r.minutes)+"'":'LIVE'} ${esc(r.score||'')}</span>`:esc(r.start_warsaw);
@@ -643,6 +662,74 @@ let OI=null,oit=null;async function loadOversOther(){clearTimeout(oit);
 try{OI=await (await fetch('/api/goal-overs-other?_='+Date.now(),{cache:'no-store'})).json();if(view=='overs-other')drawOversOther()}catch(e){if(view=='overs-other')$('#st').innerHTML='<span class="err">Błąd: '+esc(e)+'</span>'}
 if(view=='overs-other')oit=setTimeout(loadOversOther,OI&&OI.status=='computing'?4000:30000)}
 
-document.addEventListener('visibilitychange',()=>{if(!document.hidden&&(view=='worst'||view=='next')&&(Date.now()-WT)>30000)loadWorst();if(!document.hidden&&view=='overs-live')loadOversLive();if(!document.hidden&&view=='overs-other')loadOversOther()});
+
+let OK=null,okt=null;
+function kuponLeg(lg, i){
+ const name=esc((teamStr(lg.home,lg.home_name)+' – '+teamStr(lg.away,lg.away_name)).replace(/^ – | – $/g,''));
+ const live=lg.mode==='live';
+ const bits=[];
+ if(lg.sport_pl) bits.push(esc(lg.sport_pl));
+ if(live && safeText(lg.score)) bits.push('<span class="oc-score">'+esc(safeText(lg.score))+'</span>');
+ if(live && safeText(lg.time_label)){
+  let tl=safeText(lg.time_label); if(lg.score) tl=tl.split(lg.score).join('');
+  tl=tl.replace(/\bLIVE\b/gi,'').replace(/^[·,\s]+|[·,\s]+$/g,'').replace(/\s*·\s*·/g,' · ').trim();
+  if(tl) bits.push(esc(tl));
+ }
+ if(!live){
+  const when=whenWarsaw(lg);
+  if(when) bits.push(esc(when));
+ }
+ if(safeText(lg.state_label)) bits.push(esc(lg.state_label));
+ if(lg.tournament) bits.push(esc(lg.tournament));
+ return '<div class="kp-leg"><div class="nm">'+(i+1)+'. '+name+'</div>'
+  +'<div class="meta">'+(live?'<span class="oc-sp live">live</span> ':'')+bits.join(' · ')+'</div>'
+  +'<div class="play">Co zagrać: '+esc(safeText(lg.play)||'—')+'</div>'
+  +'<div class="row"><span class="oc-chip">Kurs '+esc(lg.odds_text||fmtOdds(lg.odds))+'</span>'
+  +'<span class="oc-chip">Szansa '+(lg.chance_pct!=null?(lg.chance_pct+'%'):'—')+'</span></div></div>';
+}
+function kuponCard(c, alt){
+ if(!c||!c.legs||!c.legs.length) return '';
+ const w=Math.max(0,Math.min(100,c.chance_pct||0));
+ return '<div class="kp'+(alt?' alt':'')+'"><div class="kp-h"><h3>'+(alt?'Inny wariant':'Gotowy kupon')+'</h3><span class="n">'+c.n+' '+(c.n===1?'zakład':(c.n<5?'zakłady':'zakładów'))+'</span></div>'
+  +'<div class="kp-sum"><div class="big">'+(c.chance_pct!=null?(c.chance_pct+'%'):'—')+'<small>Szansa na wygraną kuponu</small></div>'
+  +'<div class="oc-chips"><span class="oc-chip">Kurs kuponu '+esc(c.odds_text||fmtOdds(c.odds))+'</span></div></div>'
+  +'<div class="oc-bar" aria-hidden="true"><i style="width:'+w+'%"></i></div>'
+  +'<div class="kp-note">Szansa na wygraną kuponu to iloczyn szans z poszczególnych meczów. Liczę tak, jakby te mecze były niezależne — w sporcie to uproszczenie, nie gwarancja.</div>'
+  +c.legs.map(kuponLeg).join('')
+  +'</div>';
+}
+function drawKupon(){
+ if(!OK)return;
+ const box=$('#kp');
+ if(OK.status=='computing'&&!OK.primary){
+  const p=OK.progress||{};
+  box.innerHTML='<div class="sk"></div><div class="empty">Szukam typów TAK do kuponu… To chwilę trwa — nic nie zmyślam i nic nie jest stawiane.</div>';
+  let st='Szukam typów do kuponu…';
+  if(OK.feed_warsaw) st='Stan Superbet: '+esc(OK.feed_warsaw)+' (Warszawa) · '+st;
+  $('#st').innerHTML=st;
+  return;
+ }
+ const prim=OK.primary, vars=OK.variants||{};
+ let h='';
+ if(!prim){
+  h='<div class="empty">Brak dobrego kuponu teraz. Żeby złożyć 2 albo 3 zakłady, potrzebuję typów TAK z kursem Superbet, które razem dają co najmniej ok. 1,40. Zerknij za chwilę albo do zakładek Overy.</div>';
+ }else{
+  h+=kuponCard(prim,false);
+  const otherKey=prim.n===3?'legs2':'legs3';
+  if(vars[otherKey] && vars[otherKey]!==prim) h+=kuponCard(vars[otherKey],true);
+ }
+ h+='<div class="hfoot">'+esc(OK.note||OK.rule||'')+(OK.n_candidates!=null?('<br>Typów TAK do wyboru: '+OK.n_candidates):'')+'<details style="margin-top:6px;text-align:left"><summary>Jak składam kupon</summary>'+esc(OK.rule||'')+'</details></div>';
+ box.innerHTML=h;
+ const feed=OK.feed_warsaw||'';
+ let st=feed?('Stan Superbet: '+esc(feed)+' (Warszawa)'):('Aktualizacja: '+esc(OK.generated_warsaw||'')+' (Warszawa)');
+ if(OK.status=='computing') st+=' · liczę historię w tle…';
+ st+=' · odświeżanie co ok. 30 s';
+ $('#st').innerHTML=st;
+}
+async function loadKupon(){clearTimeout(okt);
+try{OK=await (await fetch('/api/goal-overs-kupon?_='+Date.now(),{cache:'no-store'})).json();if(view=='kupon')drawKupon()}catch(e){if(view=='kupon')$('#st').innerHTML='<span class="err">Błąd: '+esc(e)+'</span>'}
+if(view=='kupon')okt=setTimeout(loadKupon,OK&&OK.status=='computing'?4000:30000)}
+
+document.addEventListener('visibilitychange',()=>{if(!document.hidden&&(view=='worst'||view=='next')&&(Date.now()-WT)>30000)loadWorst();if(!document.hidden&&view=='overs-live')loadOversLive();if(!document.hidden&&view=='overs-other')loadOversOther();if(!document.hidden&&view=='kupon')loadKupon()});
 window.addEventListener('focus',()=>{if((view=='worst'||view=='next')&&(Date.now()-WT)>30000)loadWorst()});
 </script></body></html>

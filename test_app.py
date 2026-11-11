@@ -1393,6 +1393,12 @@ class TGoalOvers(unittest.TestCase):
         self.assertIn("oc-badge", app.HTML)
         self.assertIn("oc-chip", app.HTML)
         self.assertIn("0,5", app.HTML)
+        self.assertIn("Gotowy kupon", app.HTML)
+        self.assertIn("/api/goal-overs-kupon", app.HTML)
+        self.assertIn("Szansa na wygraną kuponu", app.HTML)
+        self.assertIn("Brak dobrego kuponu teraz", app.HTML)
+        self.assertIn("let view='kupon'", app.HTML)
+        self.assertLess(app.HTML.find('data-v="kupon"'), app.HTML.find('data-v="list"'))
 
 
     def test_pre_rank_keeps_team_names_not_side_fractions(self):
@@ -1729,6 +1735,66 @@ class TFreshOvers(unittest.TestCase):
             app.LIVE_OVERS_STATE.update(old)
             app.LIVE_PROFILES.clear()
             app.LIVE_PROFILES.update(old_prof)
+    def _tak(self, eid, odds, chance, play="Over 1,5 gola w 1. połowie", mode="prematch", **extra):
+        ch = float(chance)
+        d = {"eventId": eid, "home": "H%s" % eid, "away": "A%s" % eid,
+             "play": play, "odds": odds, "chance": ch, "chance_pct": int(round(ch * 100)),
+             "verdict": "PLUS", "worth": "TAK", "mode": mode,
+             "start_warsaw": "20:00", "day_warsaw": "2026-11-12"}
+        d.update(extra)
+        return d
+
+    def test_kupon_prefers_2leg_when_3leg_chance_below_60(self):
+        live = {"status": "ready", "picks": [
+            self._tak(1, 1.50, 0.80, mode="live", score="1:0", time_label="LIVE · 1:0 · 2P · 70'",
+                      state_label="stan z 19:00:00", state_age_seconds=5),
+            self._tak(2, 1.50, 0.80, mode="live", score="0:0", state_age_seconds=5),
+        ]}
+        pre = {"status": "ready", "picks": [self._tak(3, 1.50, 0.80)]}
+        other = {"status": "ready", "picks": []}
+        out = app.build_kupon_from_sources(live, pre, other)
+        self.assertEqual(out["n_candidates"], 3)
+        self.assertIsNotNone(out["primary"])
+        self.assertEqual(out["primary"]["n"], 2)
+        self.assertAlmostEqual(out["primary"]["odds"], 2.25, places=3)
+        self.assertEqual(out["primary"]["odds_text"], "2,25")
+        self.assertEqual(out["primary"]["chance_pct"], 64)
+        self.assertTrue(out["primary"]["meets_chance"])
+        self.assertIn("legs3", out["variants"])
+        self.assertEqual(out["variants"]["legs3"]["chance_pct"], 51)
+        ids = {lg["eventId"] for lg in out["primary"]["legs"]}
+        self.assertEqual(len(ids), 2)
+
+    def test_kupon_skips_unreliable_stale_and_duplicates(self):
+        live = {"status": "ready", "picks": [
+            self._tak(1, 1.60, 0.80, mode="live", state_age_seconds=5),
+            self._tak(9, 1.60, 0.90, mode="live", state_age_seconds=200),  # stale
+            dict(self._tak(8, 3.00, 0.90, mode="live", state_age_seconds=5),
+                 verdict="UNRELIABLE", worth="niepewne dane", unreliable=True),
+        ]}
+        pre = {"status": "ready", "picks": [
+            self._tak(1, 1.55, 0.85),  # same match as live
+            self._tak(2, 1.55, 0.80),
+        ]}
+        out = app.build_kupon_from_sources(live, pre, {"status": "ready", "picks": []})
+        self.assertEqual(out["n_candidates"], 2)  # 1 (live) and 2 (pre); 9 and 8 dropped
+        ids = {lg["eventId"] for lg in (out["primary"] or {}).get("legs") or []}
+        self.assertEqual(ids, {1, 2})
+        self.assertNotIn(9, ids)
+        self.assertNotIn(8, ids)
+
+    def test_kupon_empty_when_no_good_combo(self):
+        pre = {"status": "ready", "picks": [self._tak(1, 1.10, 0.90)]}
+        out = app.build_kupon_from_sources({"status": "ready", "picks": []}, pre, {"status": "ready", "picks": []})
+        self.assertIsNone(out["primary"])
+        self.assertTrue(out["empty"])
+        self.assertIn("Brak dobrego kuponu teraz", out["note"])
+        # still computing → no empty flag
+        out2 = app.build_kupon_from_sources({"status": "computing", "picks": []}, pre, {"status": "ready", "picks": []})
+        self.assertEqual(out2["status"], "computing")
+        self.assertFalse(out2["empty"])
+
+
 
 if __name__ == "__main__":
     unittest.main()

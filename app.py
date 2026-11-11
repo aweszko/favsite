@@ -2965,6 +2965,201 @@ def status():
                 "refresher": {"last_seconds_ago": round(time.time() - REFRESH_STATE["last"]) if REFRESH_STATE["last"] else None}}
 
 # ---------- serwer ----------
+
+KUPON_MIN_ODDS = 1.40
+KUPON_PREF_CHANCE = 0.60
+KUPON_POOL = 12
+
+
+def _kupon_is_tak(p, source="pre"):
+    if not p or p.get("pending"):
+        return False
+    if p.get("unreliable") or p.get("verdict") == "UNRELIABLE" or p.get("worth") == "niepewne dane":
+        return False
+    if p.get("verdict") != "PLUS" and p.get("worth") != "TAK":
+        return False
+    try:
+        odds = float(p.get("odds"))
+    except (TypeError, ValueError):
+        return False
+    if odds <= 1:
+        return False
+    ch = p.get("chance")
+    if ch is None and p.get("chance_pct") is not None:
+        try:
+            ch = float(p["chance_pct"]) / 100.0
+        except (TypeError, ValueError):
+            ch = None
+    try:
+        ch = float(ch)
+    except (TypeError, ValueError):
+        return False
+    if ch <= 0 or ch > 1:
+        return False
+    if not (p.get("play") or "").strip():
+        return False
+    live = source == "live" or p.get("mode") == "live"
+    if live:
+        age = p.get("state_age_seconds")
+        if age is not None and age > LIVE_STATE_MAX_AGE:
+            return False
+    return True
+
+
+def _kupon_leg(p, source, source_pl):
+    ch = p.get("chance")
+    if ch is None and p.get("chance_pct") is not None:
+        ch = float(p["chance_pct"]) / 100.0
+    ch = float(ch)
+    odds = float(p["odds"])
+    home = p.get("home") or p.get("home_name") or ""
+    away = p.get("away") or p.get("away_name") or ""
+    live = source == "live" or p.get("mode") == "live"
+    return {
+        "eventId": p.get("eventId"),
+        "source": source,
+        "source_pl": source_pl,
+        "sport_pl": p.get("sport_pl") or ("Piłka" if source != "other" else None),
+        "home": home, "away": away, "home_name": home, "away_name": away,
+        "play": p.get("play"),
+        "odds": round(odds, 4),
+        "odds_text": goal_overs._fmt_odds(odds),
+        "chance": round(ch, 4),
+        "chance_pct": int(round(ch * 100)),
+        "mode": "live" if live else (p.get("mode") or "prematch"),
+        "score": p.get("score") if live else None,
+        "time_label": p.get("time_label"),
+        "start_warsaw": p.get("start_warsaw"),
+        "day_warsaw": p.get("day_warsaw"),
+        "state_label": p.get("state_label"),
+        "state_warsaw": p.get("state_warsaw"),
+        "tournament": p.get("tournament") or p.get("category"),
+    }
+
+
+def _kupon_collect(live, pre, other):
+    legs, seen = [], set()
+    for source, data, label in (
+        ("live", live or {}, "Overy LIVE"),
+        ("other", other or {}, "Overy: inne sporty"),
+        ("pre", pre or {}, "Overy przedmeczowe"),
+    ):
+        for p in (data.get("picks") or []):
+            if not _kupon_is_tak(p, source):
+                continue
+            eid = p.get("eventId")
+            if eid is None or eid in seen:
+                continue
+            seen.add(eid)
+            legs.append(_kupon_leg(p, source, label))
+    return legs
+
+
+def _kupon_combo(legs):
+    odds = 1.0
+    chance = 1.0
+    for lg in legs:
+        odds *= float(lg["odds"])
+        chance *= float(lg["chance"])
+    return {
+        "legs": list(legs),
+        "n": len(legs),
+        "odds": round(odds, 4),
+        "odds_text": goal_overs._fmt_odds(odds),
+        "chance": round(chance, 4),
+        "chance_pct": int(round(chance * 100)),
+        "meets_chance": chance + 1e-12 >= KUPON_PREF_CHANCE,
+    }
+
+
+def _kupon_pick_size(pool, n):
+    from itertools import combinations
+    best = None
+    for combo in combinations(pool, n):
+        odds = 1.0
+        chance = 1.0
+        for lg in combo:
+            odds *= float(lg["odds"])
+            chance *= float(lg["chance"])
+        if odds + 1e-12 < KUPON_MIN_ODDS:
+            continue
+        qual = (1 if chance + 1e-12 >= KUPON_PREF_CHANCE else 0, chance, odds)
+        if best is None or qual > best[0]:
+            best = (qual, combo)
+    if not best:
+        return None
+    return _kupon_combo(best[1])
+
+
+def build_kupon_from_sources(live, pre, other):
+    """Z typów TAK składa kupon 2 i/lub 3 zakładów. Szansa kuponu = iloczyn, jako niezależne."""
+    legs = _kupon_collect(live, pre, other)
+    pool = sorted(legs, key=lambda x: (-(x.get("chance") or 0), -(x.get("odds") or 0)))[:KUPON_POOL]
+    variants = {}
+    for n, key in ((3, "legs3"), (2, "legs2")):
+        got = _kupon_pick_size(pool, n)
+        if got:
+            variants[key] = got
+    if variants.get("legs3") and variants["legs3"]["meets_chance"]:
+        primary = "legs3"
+    elif variants.get("legs2") and variants["legs2"]["meets_chance"]:
+        primary = "legs2"
+    elif variants.get("legs3"):
+        primary = "legs3"
+    elif variants.get("legs2"):
+        primary = "legs2"
+    else:
+        primary = None
+    sources = []
+    computing = False
+    for name, data in (("live", live), ("pre", pre), ("other", other)):
+        st = (data or {}).get("status")
+        sources.append({"name": name, "status": st, "n_picks": (data or {}).get("n_picks")})
+        if st == "computing" or (data or {}).get("partial"):
+            computing = True
+    now = datetime.now(timezone.utc)
+    if primary:
+        status = "ready"
+        note = ("Kupon z typów TAK z zakładek Overy. Kurs kuponu to iloczyn kursów, "
+                "szansa na wygraną kuponu to iloczyn szans — liczę tak, jakby mecze były niezależne, "
+                "to uproszczenie. Forma, nie gwarancja. Nic nie jest stawiane.")
+    elif computing:
+        status = "computing"
+        note = ("Szukam typów TAK do kuponu. To chwilę trwa — nic nie zmyślam i nic nie jest stawiane.")
+    else:
+        status = "ready"
+        note = ("Brak dobrego kuponu teraz. Żeby złożyć 2 albo 3 zakłady, potrzebuję typów TAK z kursem Superbet, "
+                "które razem dają co najmniej ok. 1,40. Zerknij za chwilę albo do zakładek Overy.")
+    feed = (live or {}).get("feed_warsaw") or (other or {}).get("feed_warsaw")
+    return {
+        "status": status,
+        "generated_warsaw": to_warsaw(now).strftime("%Y-%m-%d %H:%M:%S"),
+        "feed_warsaw": feed,
+        "primary": variants.get(primary) if primary else None,
+        "variants": variants,
+        "n_candidates": len(legs),
+        "computing": computing,
+        "sources": sources,
+        "note": note,
+        "rule": ("Składam kupon z 2 albo 3 typów TAK z Overy LIVE, przedmeczowych i innych sportów. "
+                 "Każdy mecz tylko raz. Bez niepewnych danych i bez nieświeżego stanu live. "
+                 "Kurs kuponu = iloczyn kursów. Szansa na wygraną kuponu = iloczyn szans przy założeniu, "
+                 "że mecze są niezależne (uproszczenie). Cel: kurs kuponu ok. 1,40 albo wyższy, "
+                 "chętnie szansa ok. 60% albo wyższa. Forma, nie gwarancja. Nic nie jest stawiane."),
+        "empty": primary is None and not computing,
+    }
+
+
+def get_overs_kupon():
+    """Kupon 2–3 typów TAK z trzech zakładek Overy. Bez zmyślania, nic nie jest stawiane."""
+    live = get_overs_live()
+    pre = get_overs()
+    other = get_overs_other()
+    out = build_kupon_from_sources(live, pre, other)
+    out["errors"] = dict(ERRORS)
+    return out
+
+
 HTML = open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "index.html"), encoding="utf-8").read()
 
 STATIC_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
@@ -3040,6 +3235,9 @@ class H(BaseHTTPRequestHandler):
             except Exception as e: return self.send(500, json.dumps({"error": str(e)}), "application/json")
         if u.path in ("/api/goal-overs-other", "/api/goal-overs-inne"):
             try: return self.send(200, json.dumps(get_overs_other(), ensure_ascii=False), "application/json; charset=utf-8")
+            except Exception as e: return self.send(500, json.dumps({"error": str(e)}), "application/json")
+        if u.path in ("/api/goal-overs-kupon", "/api/gotowy-kupon"):
+            try: return self.send(200, json.dumps(get_overs_kupon(), ensure_ascii=False), "application/json; charset=utf-8")
             except Exception as e: return self.send(500, json.dumps({"error": str(e)}), "application/json")
         if u.path == "/api/ranking":
             q = dict(urllib.parse.parse_qsl(u.query))
