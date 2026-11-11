@@ -106,16 +106,26 @@ input:focus,button:focus-visible{outline:2px solid var(--g);outline-offset:1px}.
 .oc-sp{display:inline-block;font-size:10px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;padding:2px 7px;border-radius:8px;border:1px solid #5c4a1a;color:var(--g3);background:#1d1a12}
 .oc-sp.live{background:var(--b);border-color:#c94a5a;color:#ffd4d8}
 .oc-stan{margin-left:auto;font-size:11px;color:var(--s);white-space:nowrap}
-.oc-teams{font-size:16px;font-weight:700;color:var(--g3);line-height:1.3;overflow-wrap:anywhere;word-break:break-word}
-.oc-meta{font-size:12px;color:var(--s);margin:4px 0 8px;display:flex;flex-wrap:wrap;gap:4px 8px;align-items:baseline}
+.oc-head{display:grid;grid-template-columns:1fr auto;gap:2px 12px;align-items:center;margin:2px 0 4px}
+.oc-teams{font-size:16px;font-weight:700;color:var(--g3);line-height:1.3;overflow-wrap:anywhere;word-break:break-word;min-width:0}
+.oc-scorebox{text-align:right;flex:0 0 auto;min-width:64px}
+.oc-scorebox .oc-score{display:block;font-size:22px;font-weight:800;color:var(--g);letter-spacing:-.03em;line-height:1.05}
+.oc-scorebox .oc-kick{display:block;font-size:18px;font-weight:800;color:var(--g);letter-spacing:-.02em;line-height:1.1}
+.oc-scorebox .oc-clock{display:block;font-size:11px;color:var(--s);margin-top:2px;white-space:nowrap}
+.oc-meta{font-size:12px;color:var(--s);margin:0 0 8px;display:flex;flex-wrap:wrap;gap:4px 8px;align-items:baseline}
 .oc-score{color:var(--g);font-weight:800;font-size:15px}
 .oc-play{font-size:14px;font-weight:700;color:var(--t);margin:2px 0 8px;overflow-wrap:anywhere}
 .oc-chance-row{display:flex;align-items:flex-end;justify-content:space-between;gap:8px;margin-bottom:6px}
 .oc-chance-num{font-size:28px;font-weight:800;color:var(--g);letter-spacing:-.03em;line-height:1}
 .oc-chance-num small{display:block;font-size:10px;color:var(--s);font-weight:600;letter-spacing:0;margin-top:3px;text-transform:uppercase}
-.oc-chips{display:flex;flex-wrap:wrap;gap:6px;align-items:center;justify-content:flex-end}
+.oc-chips{display:flex;flex-wrap:wrap;gap:6px;align-items:flex-end;justify-content:flex-end}
 .oc-chip{font-size:12px;font-weight:700;padding:3px 8px;border-radius:999px;border:1px solid #5c4a1a;color:var(--g3);background:#1d1a12;white-space:nowrap}
+.oc-chip.off{color:var(--s);border-color:#3a3014;font-weight:600}
+.oc-badge-wrap{display:flex;flex-direction:column;align-items:flex-end;gap:1px}
+.oc-badge-wrap small{font-size:9px;color:var(--s);font-weight:600;letter-spacing:.03em;text-transform:uppercase}
 .oc-badge{font-size:12px;font-weight:800;padding:3px 9px;border-radius:999px;white-space:nowrap;letter-spacing:.04em}
+.oc-fact{font-size:12px;color:var(--t);margin:6px 0;padding:7px 8px;border-left:2px solid #5c4a1a;background:#16110a;border-radius:0 8px 8px 0;overflow-wrap:anywhere}
+.oc-detail .oc-tbl{margin-top:4px}
 .oc-badge.tak{background:#14351f;color:#5ad67a;border:1px solid #2e7a45}
 .oc-badge.nie{background:#3a1515;color:#e07070;border:1px solid #8a3030}
 .oc-badge.uns{background:#2a2a2a;color:#c8c8c8;border:1px solid #555}
@@ -197,18 +207,18 @@ ${line('mecze z danymi',null,null,'',0).replace(/<span class="nd">brak danych<\/
 <button class="tg" onclick="open[${id}]=!open[${id}];drawRank()">${open[id]?'▲ ukryj':'▼ ostatnie 5 meczów obu drużyn'} (celne/ogółem)</button>
 ${open[id]?`<div class="g two"><div><h4>${esc(r.team)}</h4>${games(r.games)}</div><div><h4>${esc(r.opponent)}</h4>${games(r.opp_games)}</div></div>`:''}</div>`}
 function srErr(d){const e=d.errors||{};return Object.keys(e).some(k=>/sportradar/i.test(k))?'<div class="empty err">Brak danych ze źródła statystyk (Sportradar): '+esc(e.Sportradar||'')+'</div>':''}
-function drawRank(){if(!R)return;if(R.status=='computing'){const p=R.progress||{};$('#rk').innerHTML='<div class="empty">Liczę ranking… ('+(p.done||0)+'/'+(p.total||'?')+')</div>'+srErr(R);$('#st').textContent='Liczę ranking… ('+(p.done||0)+'/'+(p.total||'?')+')';return}if(R.error){$('#rk').innerHTML='<div class="empty err">Błąd: '+esc(R.error)+'</div>';return}
+function drawRank(){if(!R)return;if(R.status=='computing'){const p=R.progress||{};$('#rk').innerHTML='<div class="empty">Liczę ranking… ('+(p.done||0)+'/'+(p.total||'?')+')</div>'+srErr(R);if(view=='rank')$('#st').textContent='Liczę ranking… ('+(p.done||0)+'/'+(p.total||'?')+')';return}if(R.error){$('#rk').innerHTML='<div class="empty err">Błąd: '+esc(R.error)+'</div>';return}
 $('#rk').innerHTML=srErr(R)+(R.ranking.length?R.ranking.map(r=>card(r)).join(''):'<div class="empty">Brak faworytów spełniających kryteria.</div>')+
 ((R.conflict||[]).length?`<button class="tg" style="margin:16px 12px 0" onclick="open.cf=!open.cf;drawRank()">${open.cf?'▲':'▼'} Sprzeczne z kursem (statystyki wskazują rywala) (${R.conflict.length})</button>`+(open.cf?'<div class="empty" style="padding:8px 12px;text-align:left">Faworyt wg kursu Superbet nie prowadzi w ost. 5 meczach (śr. celnych i/lub śr. strzałów ogółem ≤ rywala). Te mecze nie są typami rankingu.</div>'+R.conflict.map(r=>card(r,1)).join(''):''):'')+
 (R.too_few.length?'<h3 style="margin:16px 12px 0;font-size:14px;color:var(--g)">Za mało danych ('+R.too_few.length+(R.too_few.some(r=>r.stale)?', w tym nieaktualne >90 dni: '+R.too_few.filter(r=>r.stale).length:'')+')</h3>'+R.too_few.map(r=>card(r,1)).join(''):'')+
 `<div class="empty" style="padding:10px">Meczów: ${R.footer.matches} · faworytów bez statystyk: ${R.footer.without_stats} · bez betradarId: ${R.footer.without_betradar}</div>`;status(R)}
-function status(d){const e=Object.entries(d.errors||{});$('#st').innerHTML=`Aktualizacja: ${d.generated_warsaw} (Warszawa)`+(d.params?` · kurs faworyta ${f(d.params.odds_min)}–${f(d.params.odds_max)}`:'')+(e.length?`<div class="err">Błąd źródła (pokazuję ostatni cache): ${esc(e.map(x=>x.join(': ')).join('; '))}</div>`:'')}
-async function loadList(){try{const t=performance.now();M=await (await fetch('/api/matches')).json();if(M.error)throw M.error;drawTabs();drawList();status(M);$('#st').innerHTML+=` · ${M.matches.length} meczów · ${Math.round(performance.now()-t)} ms`}catch(e){$('#st').innerHTML='<span class="err">Błąd ładowania: '+esc(e)+'</span>'}}
-let rt=null;async function loadRank(){clearTimeout(rt);if(!R||R.status!='computing')$('#st').textContent='Ładowanie rankingu…';
+function status(d){if(view!='list')return;const e=Object.entries(d.errors||{});$('#st').innerHTML=`Aktualizacja: ${d.generated_warsaw} (Warszawa)`+(d.params?` · kurs faworyta ${f(d.params.odds_min)}–${f(d.params.odds_max)}`:'')+(e.length?`<div class="err">Błąd źródła (pokazuję ostatni cache): ${esc(e.map(x=>x.join(': ')).join('; '))}</div>`:'')}
+async function loadList(){try{const t=performance.now();M=await (await fetch('/api/matches')).json();if(M.error)throw M.error;drawTabs();drawList();if(view=='list'){status(M);$('#st').innerHTML+=` · ${M.matches.length} meczów · ${Math.round(performance.now()-t)} ms`}}catch(e){if(view=='list')$('#st').innerHTML='<span class="err">Błąd ładowania: '+esc(e)+'</span>'}}
+let rt=null;async function loadRank(){clearTimeout(rt);if(view=='rank'&&(!R||R.status!='computing'))$('#st').textContent='Ładowanie rankingu…';
 const q=new URLSearchParams({mode:rmode,min_games:$('#mg').value,odds_min:$('#omin').value.replace(',','.'),odds_max:$('#omax').value.replace(',','.')});
 try{R=await (await fetch('/api/ranking?'+q)).json();drawRank();if(R.status=='computing'&&view=='rank')rt=setTimeout(loadRank,4000)}catch(e){$('#st').innerHTML='<span class="err">Błąd: '+esc(e)+'</span>';rt=setTimeout(loadRank,5000)}}
 document.querySelectorAll('[data-v]').forEach(b=>b.onclick=()=>{view=b.dataset.v;document.querySelectorAll('[data-v]').forEach(x=>x.classList.toggle('on',x==b));
-$('#list').hidden=view!='list';$('#rank').hidden=view!='rank';$('#vip').hidden=view!='vip';$('#pro').hidden=view!='pro';$('#worst').hidden=view!='worst';$('#next').hidden=view!='next';$('#overs-live').hidden=view!='overs-live';$('#overs-pre').hidden=view!='overs-pre';$('#overs-other').hidden=view!='overs-other';drawTabs();if(view=='worst'||view=='next'){W?(view=='worst'?drawWorst():drawNext()):0;loadWorst()}else if(view=='overs-live'){OL?drawOversLive():0;loadOversLive()}else if(view=='overs-pre'){OP?drawOversPre():0;loadOversPre()}else if(view=='overs-other'){OI?drawOversOther():0;loadOversOther()}else if(view=='pro'){P?drawPro():0;loadPro()}else if(view=='rank'){R?drawRank():loadRank()}else if(view=='vip'){V?drawVip():0;loadVip()}else if(M)status(M)});
+$('#list').hidden=view!='list';$('#rank').hidden=view!='rank';$('#vip').hidden=view!='vip';$('#pro').hidden=view!='pro';$('#worst').hidden=view!='worst';$('#next').hidden=view!='next';$('#overs-live').hidden=view!='overs-live';$('#overs-pre').hidden=view!='overs-pre';$('#overs-other').hidden=view!='overs-other';drawTabs();if(view=='worst'||view=='next'){W?(view=='worst'?drawWorst():drawNext()):0;loadWorst()}else if(view=='overs-live'){OL?drawOversLive():($('#st').textContent='Ładuję Overy LIVE…');loadOversLive()}else if(view=='overs-pre'){OP?drawOversPre():($('#st').textContent='Ładuję Overy przedmeczowe…');loadOversPre()}else if(view=='overs-other'){OI?drawOversOther():($('#st').textContent='Ładuję overy…');loadOversOther()}else if(view=='pro'){P?drawPro():0;loadPro()}else if(view=='rank'){R?drawRank():loadRank()}else if(view=='vip'){V?drawVip():0;loadVip()}else if(M)status(M)});
 ['#mg','#omin','#omax'].forEach(s=>$(s).onchange=loadRank);
 setInterval(()=>{$('#clk').textContent=new Date().toLocaleTimeString('pl-PL',{timeZone:'Europe/Warsaw',hour:'2-digit',minute:'2-digit'})},1000);
 if(location.hash=='#najslabsi'||location.hash=='#dziurawe')document.querySelector('[data-v=worst]').click();
@@ -418,46 +428,53 @@ function findMatch(list, eid){
  const id=String(eid);
  return (list||[]).find(m=>String(m.eventId)===id)||null;
 }
-function liveMeta(c, kind){
+function matchState(c, kind){
  const isLive=c.mode==='live'||kind==='live';
+ const league=safeText(c.tournament)||safeText(c.category);
  if(!isLive){
-  const bits=[];
   const when=whenWarsaw(c);
-  const lg=safeText(c.tournament)||safeText(c.category);
-  if(when) bits.push(esc(when));
-  if(lg) bits.push(esc(lg));
-  return bits.join(' · ');
+  let kick=when, dateLine='Warszawa';
+  const mm=when.match(/^(\S+)\s*\((.+)\)\s*$/);
+  if(mm){kick=mm[1];dateLine=mm[2];}
+  return {isLive:false, score:'', clock:dateLine, league:league, when:when, kick:kick};
  }
  const score=safeText(c.score);
  let tl=safeText(c.time_label);
- if(score && tl){
-  tl=tl.replace(score,'').replace(/^[·,.\s]+|[·,.\s]+$/g,'').replace(/\s{2,}/g,' ').replace(/\s*·\s*·/g,' · ');
+ if(score && tl) tl=tl.split(score).join('');
+ tl=tl.replace(/\bLIVE\b/gi,'').replace(/^[·,.\s]+|[·,.\s]+$/g,'').replace(/\s*·\s*·/g,' · ').replace(/\s{2,}/g,' ').trim();
+ return {isLive:true, score:score, clock:tl, league:league, when:'', kick:''};
+}
+function liveMeta(c, kind){
+ const s=matchState(c,kind);
+ if(!s.isLive){
+  const bits=[];
+  if(s.when) bits.push(esc(s.when));
+  if(s.league) bits.push(esc(s.league));
+  return bits.join(' · ');
  }
  const bits=[];
- if(score) bits.push('<span class="oc-score">'+esc(score)+'</span>');
- if(tl) bits.push(esc(tl));
- const lg=safeText(c.tournament)||safeText(c.category);
- if(lg) bits.push(esc(lg));
+ if(s.score) bits.push('<span class="oc-score">'+esc(s.score)+'</span>');
+ if(s.clock) bits.push(esc(s.clock));
+ if(s.league) bits.push(esc(s.league));
  return bits.join(' · ');
 }
 function compactOffer(ln){
+
  if(!ln) return '';
  if(ln.pending){
-  const why=safeText(ln.why)||'Liczą się ostatnie mecze obu drużyn (każda z różnymi rywalami). Typ pojawi się za chwilę.';
-  return '<div class="oc-why oc-pending">'+esc(why)+'</div>';
+  return '<div class="oc-pending-box"><div class="oc-bar" aria-hidden="true"><i style="width:30%;opacity:.4"></i></div><div class="oc-why oc-pending">Liczą się ostatnie mecze obu drużyn (każda z różnymi rywalami). Typ pojawi się za chwilę.</div></div>';
  }
  const pct=chancePct(ln);
  const k=worthKind(ln);
- const kurs=ln.odds!=null?fmtOdds(ln.odds):'—';
+ const kursChip=ln.odds!=null?('<span class="oc-chip">Kurs '+esc(fmtOdds(ln.odds))+'</span>'):'<span class="oc-chip off">brak kursu</span>';
  const why=safeText(ln.why);
  const play=safeText(ln.play)||'—';
  const w=pct==null?0:Math.max(0,Math.min(100,pct));
  const bar='<div class="oc-bar" aria-hidden="true"><i style="width:'+w+'%"></i></div>';
+ const badge=k?('<span class="oc-badge-wrap"><small>Opłaca się?</small><span class="oc-badge '+k+'">'+worthLabel(k)+'</span></span>'):'';
  return '<div class="oc-play">'+esc(play)+'</div>'
   +'<div class="oc-chance-row"><div class="oc-chance-num">'+(pct==null?'—':(pct+'%'))+'<small>Szansa na wygraną zakładu</small></div>'
-  +'<div class="oc-chips"><span class="oc-chip">Kurs '+esc(kurs)+'</span>'
-  +(k?'<span class="oc-badge '+k+'">'+worthLabel(k)+'</span>':'')
-  +'</div></div>'
+  +'<div class="oc-chips">'+kursChip+badge+'</div></div>'
   +bar
   +(why?'<div class="oc-why"><b>Dlaczego:</b> '+esc(why)+'</div>':'');
 }
@@ -481,18 +498,15 @@ function oversLiveDetail(m){
  const cond=(d.cond||[]).map(s=>'<div class="row">'+esc(safeText(s))+'</div>').join('');
  const rec=safeText(d.recommend||m.recommend||'');
  const stan=safeText(m.state_label)||(m.state_warsaw?('stan z '+m.state_warsaw):'');
+ const facts=[d.similar,d.given_1h,d.given_1h_now].filter(Boolean).map(s=>'<div class="oc-fact">'+esc(safeText(s))+'</div>').join('');
+ const skipRec=rec && (m.lines||[]).length && /Co zagrać|Szansa na wygraną/.test(rec);
  return '<div class="oc-detail">'
-  +'<div class="row"><b>'+esc(matchTitle(m))+'</b>'+(safeText(m.score)?' · '+esc(safeText(m.score)):'')+(safeText(m.time_label)?' · '+esc(safeText(m.time_label)):'')+(stan?' · '+esc(stan):'')+'</div>'
-  +(d.state?'<div class="row">'+esc(safeText(d.state))+'</div>':'')
-  +(d.similar?'<div class="row">'+esc(safeText(d.similar))+'</div>':'')
-  +(d.given_1h?'<div class="row">'+esc(safeText(d.given_1h))+'</div>':'')
-  +(d.given_1h_now?'<div class="row">'+esc(safeText(d.given_1h_now))+'</div>':'')
-  +cond
-  +(d.next_goal?'<div class="row">'+esc(safeText(d.next_goal))+'</div>':'')
-  +(d.scoring?'<div class="row">'+esc(safeText(d.scoring))+'</div>':'')
-  +(d.buckets?'<div class="row">'+esc(safeText(d.buckets))+'</div>':'')
   +linesTable(m)
-  +(rec?'<div class="rec">'+esc(rec)+'</div>':'')
+  +facts+cond
+  +(d.next_goal?'<div class="oc-fact">'+esc(safeText(d.next_goal))+'</div>':'')
+  +(d.scoring?'<div class="oc-fact">'+esc(safeText(d.scoring))+'</div>':'')
+  +(d.buckets?'<div class="oc-fact">'+esc(safeText(d.buckets))+'</div>':'')
+  +(rec && !skipRec?'<div class="rec">'+esc(rec)+'</div>':'')
   +warn+'</div>';
 }
 function oversPreDetail(m){
@@ -502,11 +516,11 @@ function oversPreDetail(m){
  const rec=safeText(d.recommend||m.recommend||'');
  const when=whenWarsaw(m);
  const lg=safeText(m.tournament)||safeText(m.category);
+ const skipRec=rec && (m.lines||[]).length && /Co zagrać|Szansa na wygraną/.test(rec);
  return '<div class="oc-detail">'
-  +'<div class="row"><b>'+esc(matchTitle(m))+'</b>'+(lg?' · '+esc(lg):'')+(when?' · '+esc(when):'')+'</div>'
-  +'<div class="row">Szansa na wygraną zakładu dla over 0,5, 1,5 i 2,5 w 1. połowie, z historii obu drużyn. Nie typuję tu 2. połowy ani całego meczu.</div>'
+  +'<div class="oc-fact">Szansa na wygraną zakładu dla over 0,5, 1,5 i 2,5 w 1. połowie, z historii obu drużyn. Nie typuję tu 2. połowy ani całego meczu.</div>'
   +linesTable(m)
-  +(rec?'<div class="rec">'+esc(rec)+'</div>':'')
+  +(rec && !skipRec?'<div class="rec">'+esc(rec)+'</div>':'')
   +warn+'</div>';
 }
 function oversOtherDetail(m){
@@ -517,12 +531,12 @@ function oversOtherDetail(m){
  const when=m.mode==='live'?(safeText(m.time_label)||''):whenWarsaw(m);
  const lg=[safeText(m.sport_pl),safeText(m.tournament)||safeText(m.category)].filter(Boolean).join(' · ');
  const stan=safeText(m.state_label)||(m.state_warsaw?('stan z '+m.state_warsaw):'');
+ const skipRec=rec && (m.lines||[]).length && /Co zagrać|Szansa na wygraną/.test(rec);
  return '<div class="oc-detail">'
-  +'<div class="row"><b>'+esc(matchTitle(m))+'</b>'+(lg?' · '+esc(lg):'')+(when?' · '+esc(when):'')+(safeText(m.score)?' · '+esc(safeText(m.score)):'')+(stan?' · '+esc(stan):'')+'</div>'
-  +'<div class="row">Szansa na wygraną zakładu z historii obu stron (min. 8 meczów na stronę). Typuję tylko linie z kursem ok. 1,30 albo wyższym. Gdy mecz trwa, biorę pozostały czas i aktualny wynik.</div>'
-  +(d.state?'<div class="row">'+esc(safeText(d.state))+'</div>':'')
+  +'<div class="oc-fact">Szansa na wygraną zakładu z historii obu stron (min. 8 meczów na stronę). Typuję tylko linie z kursem ok. 1,30 albo wyższym. Gdy mecz trwa, biorę pozostały czas i aktualny wynik.</div>'
   +linesTable(m)
-  +(rec?'<div class="rec">'+esc(rec)+'</div>':'')
+  +(d.state?'<div class="oc-fact">'+esc(safeText(d.state))+'</div>':'')
+  +(rec && !skipRec?'<div class="rec">'+esc(rec)+'</div>':'')
   +warn+'</div>';
 }
 function oversRankRow(c, kind, openId, matches){
@@ -530,16 +544,21 @@ function oversRankRow(c, kind, openId, matches){
  const eid=c.eventId!=null?String(c.eventId):'';
  const open=openId!=null&&eid!==''&&String(openId)===eid;
  const isLive=c.mode==='live'||kind==='live';
+ const st=matchState(c,kind);
  const sport=kind==='other'?safeText(c.sport_pl):(kind==='pre'?'1. połowa':'Piłka');
  const stan=safeText(c.state_label)||(c.state_warsaw?('stan z '+c.state_warsaw):'');
  const rank=c.rank?('<span class="oc-rk">#'+c.rank+'</span>'):'';
+ const box=st.isLive&&st.score?('<div class="oc-scorebox"><span class="oc-score">'+esc(st.score)+'</span>'+(st.clock?'<span class="oc-clock">'+esc(st.clock)+'</span>':'')+'</div>')
+  :(!st.isLive&&st.kick?('<div class="oc-scorebox"><span class="oc-kick">'+esc(st.kick)+'</span>'+(st.clock?'<span class="oc-clock">'+esc(st.clock)+'</span>':'')+'</div>'):'');
+ const metaBits=st.isLive?[st.league]:[st.league];
+ const meta=metaBits.filter(Boolean).map(esc).join(' · ');
  const row='<div class="oc-rank'+(open?' open':'')+'" data-eid="'+esc(eid)+'" role="button" aria-expanded="'+(open?'true':'false')+'">'
   +'<div class="oc-top">'+rank
   +(sport?'<span class="oc-sp'+(isLive?' live':'')+'">'+esc(sport)+(isLive?' · live':'')+'</span>':'')
   +(stan?'<span class="oc-stan">'+esc(stan)+'</span>':'')
   +'<span class="oc-chev">'+(open?'▼':'▶')+'</span></div>'
-  +'<div class="oc-teams">'+name+'</div>'
-  +'<div class="oc-meta">'+liveMeta(c,kind)+'</div>'
+  +'<div class="oc-head"><div class="oc-teams">'+name+'</div>'+box+'</div>'
+  +(meta?'<div class="oc-meta">'+meta+'</div>':'')
   +compactOffer(c)
   +'</div>';
  if(!open)return row;
