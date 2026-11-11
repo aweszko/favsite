@@ -47,6 +47,7 @@ input{background:var(--c);color:var(--t);border:1px solid var(--l);border-radius
 input:focus,button:focus-visible{outline:2px solid var(--g);outline-offset:1px}.top,#st,footer{max-width:900px;margin-left:auto;margin-right:auto}
 @media(max-width:480px){.brand img{height:40px}h1{font-size:17px}}
 @media(min-width:900px){.brand img{height:60px}#list,#rank{max-width:900px;margin:0 auto}.main,.tabs,.f{max-width:900px;margin-left:auto;margin-right:auto}}
+#overs-live,#overs-pre,#overs-other{max-width:520px;margin:0 auto;overflow-x:hidden;padding-bottom:28px}
 .vnote{margin:8px 8px 0;padding:8px 12px;border:1px solid #5c4a1a;border-left:3px solid var(--b2);border-radius:10px;background:#16130b;color:var(--g3);font-size:12px}
 .ck{width:100%;border-collapse:collapse;font-size:12px}.ck td{padding:4px 8px;border-top:1px solid #20232a}.ck td.n{color:var(--sv)}.ck td.r{text-align:right;white-space:nowrap}
 .ok{color:#5fd38a;font-weight:700}.no{color:#ff6b6b;font-weight:700}.vt{border-radius:8px;padding:1px 8px;font-weight:700;font-size:11px;background:var(--b);color:var(--g3)}
@@ -93,32 +94,50 @@ input:focus,button:focus-visible{outline:2px solid var(--g);outline-offset:1px}.
 @keyframes shm{to{background-position:-200% 0}}.pg{height:6px;border-radius:4px;background:#222;overflow:hidden;margin:12px 0 6px}.pg i{display:block;height:100%;background:var(--gg);transition:width .5s}
 .lg2{display:flex;gap:10px;font-size:11px;color:var(--s);margin:2px 0}.lg2 i{display:inline-block;width:9px;height:9px;border-radius:2px;margin-right:3px;vertical-align:-1px}
 .nf{margin:10px 0 16px;padding:12px;border:1px solid #2f2710;border-radius:14px;background:#14110a}.nf h3{margin:0 0 8px;font-size:13px;color:var(--g3)}.nf ol{margin:0;padding-left:18px;font-size:12px;color:var(--s)}.nf li{margin:3px 0}.nf b{color:var(--g3)}.nc{border:1px solid #3a3014;border-radius:16px;padding:14px;margin:0 0 12px;background:linear-gradient(180deg,#1a150c,#120e08)}.nc.hot{border-color:#c9a227;box-shadow:0 0 0 1px #c9a22744}.nc .tip{font-size:16px;font-weight:800;color:var(--g3);margin:6px 0 10px}.nc .meta{font-size:12px;color:var(--s);display:flex;flex-wrap:wrap;gap:8px}.nc .kv{display:grid;grid-template-columns:repeat(auto-fit,minmax(90px,1fr));gap:8px;margin-top:10px}.nc .kv b{display:block;font-size:16px;color:var(--g)}.nc .kv small{color:var(--s)}
-.oc-rank{border:1px solid #3a3014;border-radius:12px;padding:10px 14px;margin:0 12px 8px;background:#120e08;line-height:1.45;font-size:14px}
-.oc-rank b{color:var(--g)}
+.oc-rank{border:1px solid #3a3014;border-radius:14px;padding:12px;margin:0 10px 10px;background:linear-gradient(180deg,#1a150c,#120e08);line-height:1.4;font-size:14px;cursor:pointer;overflow:hidden}
+.oc-rank:hover{border-color:#c9a227}
+.oc-rank.open{border-radius:14px 14px 0 0;margin-bottom:0;border-color:#c9a227}
 .plus,.tak{color:#5ad67a;font-weight:800}
 .minus,.nie{color:#e07070;font-weight:800}
 .oc-offer{margin:8px 0 12px;line-height:1.55}
 .oc-offer .chance{font-size:20px;font-weight:800;color:var(--g);margin:4px 0}
-.oc-rank{cursor:pointer}
-.oc-rank:hover{border-color:#c9a227}
-.oc-rank.open{border-radius:12px 12px 0 0;margin-bottom:0;border-color:#c9a227}
-.oc-detail{margin:0 12px 12px;padding:14px;border:1px solid #c9a227;border-top:0;border-radius:0 0 12px 12px;background:#120e08}
-.oc-detail .row{margin:6px 0}
-.oc-detail .rec{font-size:15px;font-weight:700;color:var(--g3);margin:10px 0 8px}
-.oc-chev{float:right;color:var(--s);font-size:12px}
+.oc-top{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-bottom:6px}
+.oc-rk{background:var(--gg);color:#14161b;border-radius:8px;padding:1px 7px;font-weight:800;font-size:12px;flex:0 0 auto}
+.oc-sp{display:inline-block;font-size:10px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;padding:2px 7px;border-radius:8px;border:1px solid #5c4a1a;color:var(--g3);background:#1d1a12}
+.oc-sp.live{background:var(--b);border-color:#c94a5a;color:#ffd4d8}
+.oc-stan{margin-left:auto;font-size:11px;color:var(--s);white-space:nowrap}
+.oc-teams{font-size:16px;font-weight:700;color:var(--g3);line-height:1.3;overflow-wrap:anywhere;word-break:break-word}
+.oc-meta{font-size:12px;color:var(--s);margin:4px 0 8px;display:flex;flex-wrap:wrap;gap:4px 8px;align-items:baseline}
+.oc-score{color:var(--g);font-weight:800;font-size:15px}
+.oc-play{font-size:14px;font-weight:700;color:var(--t);margin:2px 0 8px;overflow-wrap:anywhere}
+.oc-chance-row{display:flex;align-items:flex-end;justify-content:space-between;gap:8px;margin-bottom:6px}
+.oc-chance-num{font-size:28px;font-weight:800;color:var(--g);letter-spacing:-.03em;line-height:1}
+.oc-chance-num small{display:block;font-size:10px;color:var(--s);font-weight:600;letter-spacing:0;margin-top:3px;text-transform:uppercase}
+.oc-chips{display:flex;flex-wrap:wrap;gap:6px;align-items:center;justify-content:flex-end}
+.oc-chip{font-size:12px;font-weight:700;padding:3px 8px;border-radius:999px;border:1px solid #5c4a1a;color:var(--g3);background:#1d1a12;white-space:nowrap}
+.oc-badge{font-size:12px;font-weight:800;padding:3px 9px;border-radius:999px;white-space:nowrap;letter-spacing:.04em}
+.oc-badge.tak{background:#14351f;color:#5ad67a;border:1px solid #2e7a45}
+.oc-badge.nie{background:#3a1515;color:#e07070;border:1px solid #8a3030}
+.oc-badge.uns{background:#2a2a2a;color:#c8c8c8;border:1px solid #555}
+.oc-bar{height:8px;border-radius:99px;background:#221c10;overflow:hidden;border:1px solid #3a3014}
+.oc-bar i{display:block;height:100%;background:var(--gg);border-radius:99px}
+.oc-why{font-size:12px;color:var(--s);margin-top:8px;line-height:1.4}
+.oc-chev{margin-left:4px;color:var(--s);font-size:11px}
+.oc-detail{margin:0 10px 12px;padding:12px;border:1px solid #c9a227;border-top:0;border-radius:0 0 14px 14px;background:#120e08;overflow-x:auto}
+.oc-detail .row{margin:6px 0;font-size:13px;overflow-wrap:anywhere}
+.oc-detail .rec{font-size:14px;font-weight:700;color:var(--g3);margin:10px 0 8px}
+.oc-tbl{width:100%;border-collapse:collapse;font-size:12px;margin-top:8px}
+.oc-tbl th,.oc-tbl td{padding:7px 6px;border-bottom:1px solid #1f1a0c;text-align:left;vertical-align:top}
+.oc-tbl th{color:var(--s);font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.04em}
+.oc-tbl td.n{text-align:center;white-space:nowrap}
+.oc-tbl td.play{overflow-wrap:anywhere}
+.oc .warn,.oc-detail .warn,.oc-rank .warn{font-size:12px;color:#e8b56a;margin-top:8px}
 .lt{width:100%;border-collapse:collapse;font-size:13px;margin-top:8px}
 .lt th,.lt td{padding:5px 6px;border-bottom:1px solid #1f1a0c;text-align:left}
 .lt th{color:var(--s);font-size:11px;font-weight:600}
 .lt td:not(:first-child){text-align:center;white-space:nowrap}
-.oc{border:1px solid #3a3014;border-radius:16px;padding:14px;margin:0 12px 12px;background:linear-gradient(180deg,#1a150c,#120e08)}
+.oc{border:1px solid #3a3014;border-radius:16px;padding:14px;margin:0 10px 12px;background:linear-gradient(180deg,#1a150c,#120e08)}
 .oc.hot{border-color:#c9a227;box-shadow:0 0 0 1px #c9a22744}
-.oc .oh{display:flex;justify-content:space-between;align-items:flex-start;gap:10px}
-.oc .chp{font-size:28px;font-weight:800;color:var(--g);letter-spacing:-.03em;line-height:1;white-space:nowrap}
-.oc .chp small{display:block;font-size:11px;color:var(--s);font-weight:600;letter-spacing:0;margin-top:2px}
-.oc .mt{font-size:13px;color:var(--s)}.oc .mt b{color:var(--g3);font-size:15px}
-.oc .play{font-size:17px;font-weight:800;color:var(--g3);margin:8px 0 6px}
-.oc .row{font-size:13px;margin:3px 0;color:var(--t)}.oc .row b{color:var(--g3);font-weight:700;margin-right:4px}
-.oc .warn{font-size:12px;color:#e8b56a;margin-top:8px}
 </style></head><body>
 <header><div class="top"><div class="brand"><img src="/icon.png" alt="Triumfator – herb" width="48" height="48"><div class="tx"><h1>Triumfator</h1><div class="sub">Porównywarka statystyk piłkarskich</div></div></div><span id="clk" class="tm"></span></div>
 <div class="main"><button data-v="list" class="on">Mecze</button><button data-v="rank">Ranking</button><button data-v="vip">VIP</button><button data-v="pro" class="pb">Pewniaki PRO</button><button data-v="worst">Dziurawe obrony</button><button data-v="next">Następny gol</button><button data-v="overs-live">Overy LIVE</button><button data-v="overs-pre">Overy przedmeczowe</button><button data-v="overs-other">Overy: tenis, siatka, kosz, hokej</button></div>
@@ -134,9 +153,9 @@ input:focus,button:focus-visible{outline:2px solid var(--g);outline-offset:1px}.
 <div id="pro" hidden><div class="vnote">Pewniaki PRO · Etap 1: lista obserwowanych (kryteria ost. 5) · Etap 2: typ dopiero LIVE przy pełnej dominacji i presji w ost. 10 min · <b>Typy to spełnione kryteria, nie gwarancja</b></div><div id="pp"></div></div>
 <div id="worst" hidden><div class="vnote">Dziurawe obrony · tylko mecze LIVE · temperatura obrony z ost. 5 meczów (5/5) z korektą siły rywala · <b>forma, nie gwarancja</b></div><div id="wp"></div></div>
 <div id="next" hidden><div class="vnote">Następny gol · twarde sita na top 3 · rywal dziurawej strzeli <b>następnego</b> gola · forma + presja teraz, nie gwarancja · brak kolejnego gola = pudło</div><div id="np"></div></div>
-<div id="overs-live" hidden><div class="vnote">Overy LIVE · każdy mecz raz · kliknij mecz, żeby zobaczyć szczegóły · co zagrać, szansa na wygraną, kurs, czy się opłaca · odświeżanie co ok. 60 s · <b>forma, nie gwarancja</b></div><div id="opl"></div></div>
-<div id="overs-pre" hidden><div class="vnote">Overy przedmeczowe · tylko 1. połowa (over 0.5, 1.5, 2.5) · każdy mecz raz · nazwy, liga, godzina (Warszawa) · typuję przy kursie ok. 1,30 albo wyższym · <b>forma, nie gwarancja</b></div><div id="opp"></div></div>
-<div id="overs-other" hidden><div class="vnote">Overy: tenis, siatka, kosz, hokej · live i przed meczem · każdy mecz raz · typuję przy kursie ok. 1,30 albo wyższym · bez historii (mniej niż 8 meczów) nie pokazuję · <b>forma, nie gwarancja</b></div><div id="opo"></div></div>
+<div id="overs-live" hidden><div class="vnote">Overy LIVE · każdy mecz raz · kliknij kartę, żeby zobaczyć linie · przy typie: szansa na wygraną, kurs, TAK/NIE · stan z godziny Superbet · odświeżanie co ok. 30 s · <b>forma, nie gwarancja</b></div><div id="opl"></div></div>
+<div id="overs-pre" hidden><div class="vnote">Overy przedmeczowe · tylko 1. połowa (over 0,5 / 1,5 / 2,5) · każdy mecz raz · nazwy, liga, godzina (Warszawa) · typuję przy kursie ok. 1,30 albo wyższym · <b>forma, nie gwarancja</b></div><div id="opp"></div></div>
+<div id="overs-other" hidden><div class="vnote">Overy: tenis, siatka, kosz, hokej · live i przed meczem · każdy mecz raz · typuję przy kursie ok. 1,30 albo wyższym · bez historii (mniej niż 8 meczów) nie pokazuję · stan z godziny Superbet · <b>forma, nie gwarancja</b></div><div id="opo"></div></div>
 <footer>Źródła: Superbet PL (oferta, kursy 1X2), Sportradar (statystyki strzałów). Godziny: Europe/Warsaw. Brak danych = „brak danych”, nic nie jest szacowane.</footer>
 <script>
 const $=s=>document.querySelector(s);let view='list',tab='live',rmode='all',M=null,R=null,open={};
@@ -349,26 +368,45 @@ function teamStr(v, fallback){
 function matchTitle(c){
  return (teamStr(c.home,c.home_name)+' – '+teamStr(c.away,c.away_name)).replace(/^ – | – $/g,'');
 }
-function oversCard(c, live){
- const warn=(c.warnings&&c.warnings.length)?'<div class="warn">⚠ '+c.warnings.map(esc).join(' · ')+'</div>':'';
- const when=live?(esc(c.time_label||((c.minutes!=null?c.minutes+"'":'LIVE')))+' · '+esc(c.score||'')):esc(whenWarsaw(c));
- const lg=[c.category,c.tournament].filter(Boolean).join(' · ');
- return `<div class="oc${c.rank<=3?' hot':''}"><div class="oh"><div class="mt">${when}${lg?' · '+esc(lg):''}<br><b>${esc(matchTitle(c))}${live&&c.score?' · '+esc(c.score):''}</b></div></div>
-${lineOffer(c)}${warn}</div>`;
+function safeText(v){
+ if(v==null||v==='') return '';
+ if(typeof v==='object') return '';
+ const s=String(v);
+ if(s==='[object Object]'||s==='undefined'||s==='NaN') return '';
+ return s;
 }
-function oversRankLine(c, dim){
- const label=dim?'':'<b>#'+c.rank+'.</b> ';
- return '<div class="oc-rank">'+label+esc(matchTitle(c))+' · '+(c.play||'')+'</div>';
+function chancePct(ln){
+ if(!ln) return null;
+ if(ln.chance_pct!=null && Number.isFinite(Number(ln.chance_pct))) return Math.round(Number(ln.chance_pct));
+ if(ln.chance!=null && Number.isFinite(Number(ln.chance))) return Math.round(Number(ln.chance)*100);
+ return null;
 }
+function fmtOdds(x){
+ if(x==null||x==='') return '—';
+ const n=Number(String(x).replace(',','.'));
+ if(!Number.isFinite(n)) return '—';
+ return n.toFixed(2).replace('.',',');
+}
+function fmtPct(x){
+ const n=chancePct({chance_pct:x});
+ return n==null?'—':(n+'%');
+}
+function worthKind(ln){
+ if(!ln) return '';
+ if(ln.unreliable||ln.verdict==='UNRELIABLE'||ln.worth==='niepewne dane') return 'uns';
+ if(ln.verdict==='PLUS'||ln.worth==='TAK') return 'tak';
+ if(ln.verdict==='MINUS'||ln.worth==='NIE') return 'nie';
+ return '';
+}
+function worthLabel(k){return k==='tak'?'TAK':k==='nie'?'NIE':k==='uns'?'niepewne':'';}
 function verdictBadge(v){
  if(v==='PLUS'||v==='TAK')return ' <b class="plus">Opłaca się? TAK</b>';
  if(v==='MINUS'||v==='NIE')return ' <b class="minus">Opłaca się? NIE</b>';
  return '';
 }
-function fmtOdds(x){return (x==null||x==='')?'—':String(x).replace('.',',')}
 function whenWarsaw(c){
- const t=c.start_warsaw||'';
- const d=c.day_warsaw||'';
+ const t=safeText(c.start_warsaw);
+ const d=safeText(c.day_warsaw);
  if(d&&t){const p=String(d).split('-');const short=(p.length===3)?(p[2]+'.'+p[1]):d;return t+' ('+short+', Warszawa)';}
  if(t)return t+' (Warszawa)';
  if(d)return d+' (Warszawa)';
@@ -379,76 +417,126 @@ function findMatch(list, eid){
  const id=String(eid);
  return (list||[]).find(m=>String(m.eventId)===id)||null;
 }
-function lineOffer(ln){
- if(!ln)return '';
- const ch=ln.chance_label||('Szansa na wygraną zakładu: '+(ln.chance_pct!=null?(ln.chance_pct+'%'):'nie wiadomo'));
- const kurs=ln.odds!=null?fmtOdds(ln.odds):'brak kursu Superbet';
- let worth=ln.worth_text;
- if(!worth){
-  if(ln.verdict==='PLUS'||ln.worth==='TAK') worth='Opłaca się? TAK'+(ln.worth_because?(' ('+ln.worth_because+')'):'');
-  else if(ln.verdict==='MINUS'||ln.worth==='NIE') worth='Opłaca się? NIE'+(ln.worth_because?(' ('+ln.worth_because+')'):'');
-  else worth='Opłaca się? Jeszcze nie wiadomo (nie ma kursu Superbet).';
+function liveMeta(c, kind){
+ const isLive=c.mode==='live'||kind==='live';
+ if(!isLive){
+  const bits=[];
+  const when=whenWarsaw(c);
+  const lg=safeText(c.tournament)||safeText(c.category);
+  if(when) bits.push(esc(when));
+  if(lg) bits.push(esc(lg));
+  return bits.join(' · ');
  }
- const wclass=(ln.verdict==='PLUS'||ln.worth==='TAK')?'tak':((ln.unreliable||ln.verdict==='UNRELIABLE'||ln.worth==='niepewne dane'||ln.verdict==='MINUS'||ln.worth==='NIE')?'nie':'');
- const why=ln.why?('<div><b>Dlaczego:</b> '+esc(ln.why)+'</div>'):'';
- return '<div class="oc-offer">'
-  +'<div><b>Co zagrać:</b> '+esc(ln.play||'—')+'</div>'
-  +'<div class="chance">'+esc(ch)+'</div>'
-  +'<div><b>Kurs:</b> '+esc(String(kurs))+'</div>'
-  +'<div class="'+wclass+'">'+esc(worth)+'</div>'
-  +why
-  +'</div>';
+ const score=safeText(c.score);
+ let tl=safeText(c.time_label);
+ if(score && tl){
+  tl=tl.replace(score,'').replace(/^[·,.\s]+|[·,.\s]+$/g,'').replace(/\s{2,}/g,' ').replace(/\s*·\s*·/g,' · ');
+ }
+ const bits=[];
+ if(score) bits.push('<span class="oc-score">'+esc(score)+'</span>');
+ if(tl) bits.push(esc(tl));
+ const lg=safeText(c.tournament)||safeText(c.category);
+ if(lg) bits.push(esc(lg));
+ return bits.join(' · ');
 }
+function compactOffer(ln){
+ if(!ln) return '';
+ const pct=chancePct(ln);
+ const k=worthKind(ln);
+ const kurs=ln.odds!=null?fmtOdds(ln.odds):'—';
+ const why=safeText(ln.why);
+ const play=safeText(ln.play)||'—';
+ const w=pct==null?0:Math.max(0,Math.min(100,pct));
+ const bar='<div class="oc-bar" aria-hidden="true"><i style="width:'+w+'%"></i></div>';
+ return '<div class="oc-play">'+esc(play)+'</div>'
+  +'<div class="oc-chance-row"><div class="oc-chance-num">'+(pct==null?'—':(pct+'%'))+'<small>Szansa na wygraną zakładu</small></div>'
+  +'<div class="oc-chips"><span class="oc-chip">Kurs '+esc(kurs)+'</span>'
+  +(k?'<span class="oc-badge '+k+'">'+worthLabel(k)+'</span>':'')
+  +'</div></div>'
+  +bar
+  +(why?'<div class="oc-why"><b>Dlaczego:</b> '+esc(why)+'</div>':'');
+}
+function lineOffer(ln){return compactOffer(ln)}
 function linesTable(m){
- const rows=(m.lines||[]).map(lineOffer).join('');
- return rows?('<div class="oc-lines">'+rows+'</div>'):'';
+ const rows=(m.lines||[]);
+ if(!rows.length) return '';
+ return '<div style="overflow-x:auto"><table class="oc-tbl"><thead><tr><th>Co zagrać</th><th>Szansa</th><th>Kurs</th><th>Opłaca się?</th></tr></thead><tbody>'
+  +rows.map(ln=>{
+    const k=worthKind(ln);
+    const ch=ln.chance_pct!=null||ln.chance!=null?fmtPct(ln.chance_pct!=null?ln.chance_pct:(ln.chance*100)):'—';
+    const kurs=ln.odds!=null?fmtOdds(ln.odds):'—';
+    return '<tr><td class="play">'+esc(safeText(ln.play)||'—')+'</td><td class="n">'+esc(ch)+'</td><td class="n">'+esc(kurs)+'</td><td class="n">'+(k?'<span class="oc-badge '+k+'">'+worthLabel(k)+'</span>':'—')+'</td></tr>';
+  }).join('')
+  +'</tbody></table></div>';
 }
 function oversLiveDetail(m){
  if(!m)return '<div class="oc-detail"><div class="row">Brak szczegółów dla tego meczu.</div></div>';
  const d=m.detail||{};
- const warn=(m.warnings&&m.warnings.length)?'<div class="warn">'+m.warnings.map(w=>'⚠️ '+esc(w)).join('<br>')+'</div>':'';
- const cond=(d.cond||[]).map(s=>'<div class="row">'+esc(s)+'</div>').join('');
- const rec=d.recommend||m.recommend||'';
+ const warn=(m.warnings&&m.warnings.length)?'<div class="warn">'+m.warnings.map(w=>'⚠️ '+esc(safeText(w))).join('<br>')+'</div>':'';
+ const cond=(d.cond||[]).map(s=>'<div class="row">'+esc(safeText(s))+'</div>').join('');
+ const rec=safeText(d.recommend||m.recommend||'');
+ const stan=safeText(m.state_label)||(m.state_warsaw?('stan z '+m.state_warsaw):'');
  return '<div class="oc-detail">'
-  +'<div class="row"><b>'+esc(matchTitle(m))+'</b>'+(m.score?' · '+esc(m.score):'')+(m.time_label?' · '+esc(m.time_label):'')+'</div>'
-  +(d.state?'<div class="row">'+esc(d.state)+'</div>':'')
-  +(d.similar?'<div class="row">'+esc(d.similar)+'</div>':'')
-  +(d.offer?('<div class="row">'+esc(d.offer)+'</div>'):lineOffer(m))
-  +(d.given_1h?'<div class="row">'+esc(d.given_1h)+'</div>':'')
-  +(d.given_1h_now?'<div class="row">'+esc(d.given_1h_now)+'</div>':'')
+  +'<div class="row"><b>'+esc(matchTitle(m))+'</b>'+(safeText(m.score)?' · '+esc(safeText(m.score)):'')+(safeText(m.time_label)?' · '+esc(safeText(m.time_label)):'')+(stan?' · '+esc(stan):'')+'</div>'
+  +(d.state?'<div class="row">'+esc(safeText(d.state))+'</div>':'')
+  +(d.similar?'<div class="row">'+esc(safeText(d.similar))+'</div>':'')
+  +(d.given_1h?'<div class="row">'+esc(safeText(d.given_1h))+'</div>':'')
+  +(d.given_1h_now?'<div class="row">'+esc(safeText(d.given_1h_now))+'</div>':'')
   +cond
-  +(d.next_goal?'<div class="row">'+esc(d.next_goal)+'</div>':'')
-  +(d.scoring?'<div class="row">'+esc(d.scoring)+'</div>':'')
-  +(d.buckets?'<div class="row">'+esc(d.buckets)+'</div>':'')
+  +(d.next_goal?'<div class="row">'+esc(safeText(d.next_goal))+'</div>':'')
+  +(d.scoring?'<div class="row">'+esc(safeText(d.scoring))+'</div>':'')
+  +(d.buckets?'<div class="row">'+esc(safeText(d.buckets))+'</div>':'')
   +linesTable(m)
-  +(rec && rec!==d.offer?'<div class="rec">'+esc(rec)+'</div>':'')
+  +(rec?'<div class="rec">'+esc(rec)+'</div>':'')
   +warn+'</div>';
 }
 function oversPreDetail(m){
  if(!m)return '<div class="oc-detail"><div class="row">Brak szczegółów dla tego meczu.</div></div>';
  const d=m.detail||{};
- const warn=(m.warnings&&m.warnings.length)?'<div class="warn">'+m.warnings.map(w=>'⚠️ '+esc(w)).join('<br>')+'</div>':'';
- const rec=d.recommend||m.recommend||'';
+ const warn=(m.warnings&&m.warnings.length)?'<div class="warn">'+m.warnings.map(w=>'⚠️ '+esc(safeText(w))).join('<br>')+'</div>':'';
+ const rec=safeText(d.recommend||m.recommend||'');
  const when=whenWarsaw(m);
- const lg=m.tournament||m.category||'';
+ const lg=safeText(m.tournament)||safeText(m.category);
  return '<div class="oc-detail">'
   +'<div class="row"><b>'+esc(matchTitle(m))+'</b>'+(lg?' · '+esc(lg):'')+(when?' · '+esc(when):'')+'</div>'
-  +'<div class="row">Szansa na wygraną zakładu dla over 0.5, 1.5 i 2.5 w 1. połowie, z historii obu drużyn. Nie typuję tu 2. połowy ani całego meczu.</div>'
-  +(d.offer?('<div class="row">'+esc(d.offer)+'</div>'):'')
+  +'<div class="row">Szansa na wygraną zakładu dla over 0,5, 1,5 i 2,5 w 1. połowie, z historii obu drużyn. Nie typuję tu 2. połowy ani całego meczu.</div>'
   +linesTable(m)
-  +(rec && rec!==d.offer?'<div class="rec">'+esc(rec)+'</div>':'')
+  +(rec?'<div class="rec">'+esc(rec)+'</div>':'')
+  +warn+'</div>';
+}
+function oversOtherDetail(m){
+ if(!m)return '<div class="oc-detail"><div class="row">Brak szczegółów dla tego meczu.</div></div>';
+ const d=m.detail||{};
+ const warn=(m.warnings&&m.warnings.length)?'<div class="warn">'+m.warnings.map(w=>'⚠️ '+esc(safeText(w))).join('<br>')+'</div>':'';
+ const rec=safeText(d.recommend||m.recommend||'');
+ const when=m.mode==='live'?(safeText(m.time_label)||''):whenWarsaw(m);
+ const lg=[safeText(m.sport_pl),safeText(m.tournament)||safeText(m.category)].filter(Boolean).join(' · ');
+ const stan=safeText(m.state_label)||(m.state_warsaw?('stan z '+m.state_warsaw):'');
+ return '<div class="oc-detail">'
+  +'<div class="row"><b>'+esc(matchTitle(m))+'</b>'+(lg?' · '+esc(lg):'')+(when?' · '+esc(when):'')+(safeText(m.score)?' · '+esc(safeText(m.score)):'')+(stan?' · '+esc(stan):'')+'</div>'
+  +'<div class="row">Szansa na wygraną zakładu z historii obu stron (min. 8 meczów na stronę). Typuję tylko linie z kursem ok. 1,30 albo wyższym. Gdy mecz trwa, biorę pozostały czas i aktualny wynik.</div>'
+  +(d.state?'<div class="row">'+esc(safeText(d.state))+'</div>':'')
+  +linesTable(m)
+  +(rec?'<div class="rec">'+esc(rec)+'</div>':'')
   +warn+'</div>';
 }
 function oversRankRow(c, kind, openId, matches){
  const name=esc(matchTitle(c));
- const lg=c.tournament||c.category||'';
- const when=(c.mode==='live'||kind==='live')?(c.time_label||''):whenWarsaw(c);
- const meta=[when,lg].filter(Boolean).join(' · ');
- const ch=c.chance_label||(c.chance_pct!=null?('Szansa na wygraną zakładu: '+c.chance_pct+'%'):'Szansa na wygraną zakładu: nie wiadomo');
  const eid=c.eventId!=null?String(c.eventId):'';
  const open=openId!=null&&eid!==''&&String(openId)===eid;
- const rank=c.rank?('<b>#'+c.rank+'.</b> '):'';
- const row='<div class="oc-rank'+(open?' open':'')+'" data-eid="'+esc(eid)+'" role="button" aria-expanded="'+(open?'true':'false')+'"><span class="oc-chev">'+(open?'▼':'▶')+'</span>'+rank+(kind==='other'&&c.sport_pl?('<span class="vt">'+esc(c.sport_pl)+(c.mode==='live'?' LIVE':'')+'</span> '):'')+'<b>'+name+'</b>'+(meta?' <span class="mt">'+esc(meta)+'</span>':'')+'<br>'+lineOffer(c)+'</div>';
+ const isLive=c.mode==='live'||kind==='live';
+ const sport=kind==='other'?safeText(c.sport_pl):(kind==='pre'?'1. połowa':'Piłka');
+ const stan=safeText(c.state_label)||(c.state_warsaw?('stan z '+c.state_warsaw):'');
+ const rank=c.rank?('<span class="oc-rk">#'+c.rank+'</span>'):'';
+ const row='<div class="oc-rank'+(open?' open':'')+'" data-eid="'+esc(eid)+'" role="button" aria-expanded="'+(open?'true':'false')+'">'
+  +'<div class="oc-top">'+rank
+  +(sport?'<span class="oc-sp'+(isLive?' live':'')+'">'+esc(sport)+(isLive?' · live':'')+'</span>':'')
+  +(stan?'<span class="oc-stan">'+esc(stan)+'</span>':'')
+  +'<span class="oc-chev">'+(open?'▼':'▶')+'</span></div>'
+  +'<div class="oc-teams">'+name+'</div>'
+  +'<div class="oc-meta">'+liveMeta(c,kind)+'</div>'
+  +compactOffer(c)
+  +'</div>';
  if(!open)return row;
  const m=findMatch(matches,eid)||c;
  return row+(kind==='live'?oversLiveDetail(m):kind==='other'?oversOtherDetail(m):oversPreDetail(m));
@@ -465,50 +553,53 @@ function bindOversClicks(box, kind){
   else{OP_OPEN=(OP_OPEN===id)?null:id;drawOversPre()}
  };
 }
-function oversOtherDetail(m){
- if(!m)return '<div class="oc-detail"><div class="row">Brak szczegółów dla tego meczu.</div></div>';
- const d=m.detail||{};
- const warn=(m.warnings&&m.warnings.length)?'<div class="warn">'+m.warnings.map(w=>'⚠️ '+esc(w)).join('<br>')+'</div>':'';
- const rec=d.recommend||m.recommend||'';
- const when=m.mode==='live'?(m.time_label||''):whenWarsaw(m);
- const lg=[m.sport_pl,m.tournament||m.category].filter(Boolean).join(' · ');
- return '<div class="oc-detail">'
-  +'<div class="row"><b>'+esc(matchTitle(m))+'</b>'+(lg?' · '+esc(lg):'')+(when?' · '+esc(when):'')+(m.score?' · '+esc(m.score):'')+'</div>'
-  +'<div class="row">Szansa na wygraną zakładu z historii obu stron (min. 8 meczów na stronę). Typuję tylko linie z kursem ok. 1,30 albo wyższym. Gdy mecz trwa, biorę tylko podobne wyniki.</div>'
-  +(d.state?'<div class="row">'+esc(d.state)+'</div>':'')
-  +(d.offer?('<div class="row">'+esc(d.offer)+'</div>'):lineOffer(m))
-  +linesTable(m)
-  +(rec && rec!==d.offer?'<div class="rec">'+esc(rec)+'</div>':'')
-  +warn+'</div>';
+function oversEmptyMsg(kind,d){
+ if(d&&d.note&&String(d.note).indexOf('2 minuty')>=0) return d.note;
+ if(kind==='other') return 'Na razie żaden typ nie ma jednocześnie szansy ≥ 60%, kursu ok. 1,30 i wystarczającej historii. Jeśli poniżej są mecze, kliknij kartę, żeby zobaczyć linie.';
+ if(kind==='live') return 'Teraz żadna linia nie ma jednocześnie szansy ≥ 60% i kursu Superbet. Jeśli poniżej są mecze, kliknij kartę, żeby zobaczyć szczegóły.';
+ return 'Brak typów na 1. połowę z szansą ≥ 60% i kursem ok. 1,30 albo wyższym. Jeśli poniżej są mecze, kliknij kartę, żeby zobaczyć over 0,5, 1,5 i 2,5 w 1. połowie.';
 }
 function drawOversInto(d, mount, live, other){
  if(!d)return;
  const box=$(mount);
  const hasLive=d.picks&&d.picks.length||d.matches&&d.matches.length;
- if(d.status=='computing'&&!hasLive&&!(d.picks&&d.picks.length)){const p=d.progress||{};box.innerHTML='<div class="empty">Liczą się overy w tle… ('+(p.done||0)+'/'+(p.total||'?')+'). Pierwsze liczenie może potrwać chwilę — strona nie blokuje się.</div>';return}
+ if(d.status=='computing'&&!hasLive&&!(d.picks&&d.picks.length)){
+  const p=d.progress||{};
+  box.innerHTML='<div class="sk"></div><div class="sk"></div><div class="empty">Chwilę, liczę overy w tle… ('+(p.done||0)+'/'+(p.total||'?')+'). Pierwsze liczenie może potrwać — nic nie zmyślam i nic nie jest stawiane.</div>';
+  let st='Liczą się overy w tle…';
+  if(d.feed_warsaw) st='Stan Superbet: '+esc(d.feed_warsaw)+' (Warszawa) · '+st;
+  $('#st').innerHTML=st;
+  return;
+ }
  const P=d.picks||[], M=d.matches||[];
  const kind=other?'other':(live?'live':'pre');
  const openId=other?OI_OPEN:(live?OL_OPEN:OP_OPEN);
  let h='<div class="nf"><h3>Ranking 1–10</h3></div>';
- if(!P.length)h+='<div class="empty">'+(other?'Na razie żaden typ nie ma jednocześnie szansy ≥ 60%, kursu ok. 1,30 i wystarczającej historii. Kliknij mecz niżej, żeby zobaczyć linie.':(live?'Teraz żadna linia nie ma jednocześnie szansy ≥ 60% i kursu Superbet. Kliknij mecz niżej, żeby zobaczyć szczegóły.':'Brak typów na 1. połowę z szansą ≥ 60% i kursem ok. 1,30 albo wyższym. Kliknij mecz niżej, żeby zobaczyć over 0.5, 1.5 i 2.5 w 1. połowie.'))+'</div>';
+ if(!P.length)h+='<div class="empty">'+esc(oversEmptyMsg(kind,d))+'</div>';
  else h+=P.map(c=>oversRankRow(c,kind,openId,M)).join('');
- if(M.length){
-  h+='<div class="nf" style="margin-top:18px"><h3>'+(other?'Wszystkie sprawdzone mecze (live i przed meczem)':(live?'Wszystkie mecze live':'Wszystkie mecze przedmeczowe'))+'</h3></div>';
-  const inRank=new Set(P.map(c=>String(c.eventId||'')));
-  h+=M.map(m=>{
-   const c=Object.assign({},m);
-   if(inRank.has(String(m.eventId||''))){/* w rankingu też można rozwinąć; tu lista bez # jeśli już wyżej */c.rank=c.rank||null;}
-   return oversRankRow(c,kind,openId,M);
-  }).join('');
+ const inRank=new Set(P.map(c=>String(c.eventId||'')));
+ const rest=M.filter(m=>!inRank.has(String(m.eventId||'')));
+ if(rest.length){
+  h+='<div class="nf" style="margin-top:18px"><h3>'+(other?'Pozostałe sprawdzone mecze (live i przed meczem)':(live?'Wszystkie mecze live':'Wszystkie mecze przedmeczowe'))+'</h3></div>';
+  h+=rest.map(m=>oversRankRow(Object.assign({},m,{rank:null}),kind,openId,M)).join('');
+ }else if(!P.length && !M.length){
+  h+='<div class="empty">Nie mam teraz żadnego meczu do pokazania. Odśwież za chwilę — nic nie zmyślam.</div>';
+ }else if(!rest.length && P.length && M.length){
+  /* wszystkie sprawdzone są już w rankingu */
  }
  const footMatches=(d.footer&&d.footer.matches)!=null?d.footer.matches:(d.live_matches||M.length||0);
-  const sp=d.footer&&d.footer.sports; const spLine=sp?(' · '+Object.keys(sp).map(k=>{const s=sp[k];return (s.label||k)+': '+(s.with_history||0)+'/'+(s.listed||0);}).join(' · ')):'';
+ const sp=d.footer&&d.footer.sports; const spLine=sp?(' · '+Object.keys(sp).map(k=>{const s=sp[k];return (s.label||k)+': '+(s.with_history||0)+'/'+(s.listed||0);}).join(' · ')):'';
  h+=`<div class="hfoot">${esc(d.note||'')}<br>Meczów: ${footMatches} · z historią: ${d.n_matches||M.length} · bez danych: ${(d.footer&&d.footer.without_stats)||0}${spLine}<details style="margin-top:6px;text-align:left"><summary>Jak liczona jest szansa</summary>${esc(d.rule||'')}</details></div>`;
  box.innerHTML=h;
  bindOversClicks(box, kind);
- const e=Object.entries(d.errors||{}).filter(x=>x[0]!='overy_job'&&x[0]!='overy_live_job');
- let st=`Aktualizacja: ${esc(d.generated_warsaw||'')} (Warszawa)`;
- if(live) st+=' · każdy mecz raz · odświeżanie co ok. 60 s';
+ const e=Object.entries(d.errors||{}).filter(x=>x[0]!='overy_job'&&x[0]!='overy_live_job'&&x[0]!='overy_inne');
+ const feed=d.feed_warsaw||'';
+ let st = feed ? ('Stan Superbet: '+esc(feed)+' (Warszawa)') : ('Aktualizacja: '+esc(d.generated_warsaw||'')+' (Warszawa)');
+ if(d.generated_warsaw && feed){
+  const clock=String(d.generated_warsaw);
+  st+=' · strona: '+esc(clock.length>=8?clock.slice(-8):clock);
+ }
+ if(live||other) st+=' · odświeżanie co ok. 30 s';
  else st+=(d.source=='seed'?' · dane startowe, liczę aktualne w tle':d.source=='mixed'?' · część kart z zrzutu, liczę resztę w tle':'')+' · godzina w strefie Warszawa';
  if(d.status=='computing') st+=' · liczę historię drużyn w tle…';
  if(e.length) st+=`<div class="err">Błąd źródła: ${esc(e.map(x=>x.join(': ')).join('; '))}</div>`;
@@ -519,14 +610,14 @@ function drawOversPre(){drawOversInto(OP,'#opp',false,false)}
 function drawOversOther(){drawOversInto(OI,'#opo',false,true)}
 async function loadOversLive(){clearTimeout(olt);
 try{OL=await (await fetch('/api/goal-overs-live?_='+Date.now(),{cache:'no-store'})).json();if(view=='overs-live')drawOversLive()}catch(e){if(view=='overs-live')$('#st').innerHTML='<span class="err">Błąd: '+esc(e)+'</span>'}
-if(view=='overs-live')olt=setTimeout(loadOversLive,OL&&OL.status=='computing'?4000:60000)}
+if(view=='overs-live')olt=setTimeout(loadOversLive,OL&&OL.status=='computing'?4000:30000)}
 async function loadOversPre(){clearTimeout(opt);
 try{OP=await (await fetch('/api/goal-overs-pre?_='+Date.now(),{cache:'no-store'})).json();if(view=='overs-pre')drawOversPre()}catch(e){if(view=='overs-pre')$('#st').innerHTML='<span class="err">Błąd: '+esc(e)+'</span>'}
 if(view=='overs-pre')opt=setTimeout(loadOversPre,OP&&OP.status=='computing'?4000:60000)}
 let OI=null,oit=null;async function loadOversOther(){clearTimeout(oit);
 try{OI=await (await fetch('/api/goal-overs-other?_='+Date.now(),{cache:'no-store'})).json();if(view=='overs-other')drawOversOther()}catch(e){if(view=='overs-other')$('#st').innerHTML='<span class="err">Błąd: '+esc(e)+'</span>'}
-if(view=='overs-other')oit=setTimeout(loadOversOther,OI&&OI.status=='computing'?4000:60000)}
+if(view=='overs-other')oit=setTimeout(loadOversOther,OI&&OI.status=='computing'?4000:30000)}
 
-document.addEventListener('visibilitychange',()=>{if(!document.hidden&&(view=='worst'||view=='next')&&(Date.now()-WT)>30000)loadWorst();if(!document.hidden&&view=='overs-live')loadOversLive()});
+document.addEventListener('visibilitychange',()=>{if(!document.hidden&&(view=='worst'||view=='next')&&(Date.now()-WT)>30000)loadWorst();if(!document.hidden&&view=='overs-live')loadOversLive();if(!document.hidden&&view=='overs-other')loadOversOther()});
 window.addEventListener('focus',()=>{if((view=='worst'||view=='next')&&(Date.now()-WT)>30000)loadWorst()});
 </script></body></html>

@@ -1388,6 +1388,11 @@ class TGoalOvers(unittest.TestCase):
         self.assertIn("Overy: tenis, siatka, kosz, hokej", app.HTML)
         self.assertIn("#overy-inne", app.HTML)
         self.assertIn("/api/goal-overs-other", app.HTML)
+        self.assertIn("stan z", app.HTML)
+        self.assertIn("oc-bar", app.HTML)
+        self.assertIn("oc-badge", app.HTML)
+        self.assertIn("oc-chip", app.HTML)
+        self.assertIn("0,5", app.HTML)
 
 
     def test_pre_rank_keeps_team_names_not_side_fractions(self):
@@ -1560,6 +1565,118 @@ class TGoalOvers(unittest.TestCase):
     def test_history_capped_for_free_plan(self):
         self.assertEqual(app.OVERS_HISTORY, 10)
         self.assertLessEqual(app.OVERS_MATCH_MAX, 50)
+
+class TFreshOvers(unittest.TestCase):
+
+    def test_stamp_card_warsaw_clock(self):
+        import time
+        from datetime import datetime, timezone
+        ts = datetime(2026, 11, 11, 18, 13, 22, tzinfo=timezone.utc).timestamp()  # 19:13:22 Warsaw (UTC+1)
+        card = app.stamp_card({"home": "Parnu", "mode": "live"}, ts, live=True)
+        self.assertEqual(card["state_warsaw"], "19:13:22")
+        self.assertEqual(card["state_label"], "stan z 19:13:22")
+        self.assertGreaterEqual(card["state_age_seconds"], 0)
+
+    def test_live_publish_drops_stale_superbet_feed(self):
+        import time
+        old = dict(app.LIVE_OVERS_STATE)
+        try:
+            evs = [{"eventId": 1, "br": 99, "home": "A", "away": "B", "mode": "live", "score": "1:0"}]
+            res = app._publish_live_overs(evs, partial=False, fetch_odds=False,
+                                          fetched_at=time.time() - 200)
+            self.assertFalse(res.get("picks"))
+            self.assertFalse(res.get("matches"))
+            self.assertIn("2 minuty", res.get("note") or "")
+            self.assertEqual(res["footer"]["stale_feed"], 1)
+            self.assertEqual(res.get("feed_age_seconds"), 200)
+        finally:
+            app.LIVE_OVERS_STATE.clear()
+            app.LIVE_OVERS_STATE.update(old)
+
+    def _bball_ms(self, q4=32, n=10):
+        out = []
+        for _ in range(n):
+            q1=q2=q3=40
+            tot=q1+q2+q3+q4
+            out.append({"result": (tot//2, tot-tot//2), "period_pairs": {1:(20,20),2:(20,20),3:(20,20),4:(q4//2,q4-q4//2)},
+                        "points": tot, "quarters": {1:q1,2:q2,3:q3,4:q4}, "h2": q3+q4, "ot_points": None})
+        return out
+
+    def _other_profile(self, eid=10, mode="live", seen_live=None, ts=None, score="70:40"):
+        home = self._bball_ms(32, 10) + self._bball_ms(50, 10)
+        away = list(home)
+        offers = {"points_160.5": {"key": "points_160.5", "base": "points", "field": "points",
+                                   "part": None, "line": 160.5, "odds": 1.55, "unit": "punktu w meczu",
+                                   "play": "Over 160,5 punktu w meczu"}}
+        ev = {"eventId": eid, "home": "Parnu", "away": "Slovan Bratysława",
+              "sport": "basketball", "sportId": 4, "mode": mode,
+              "score": score, "home_score": 70, "away_score": 40,
+              "period": "3K", "minutes": 28, "remainingPeriodTime": "2:00",
+              "start_warsaw": "19:00", "day_warsaw": "2026-11-11", "ts": ts}
+        return {
+            "home_ms": home, "away_ms": away, "offers": offers, "info": {},
+            "sport": "basketball", "sportId": 4, "base": ev,
+            "seen_live": (mode == "live") if seen_live is None else seen_live,
+            "stored_at": 1,
+        }
+
+    def test_refresh_other_uses_fresh_superbet_score(self):
+        import time
+        now = time.time()
+        prof = self._other_profile()
+        live = [{"eventId": 10, "home": "Parnu", "away": "Slovan Bratysława",
+                 "sport": "basketball", "sportId": 4, "mode": "live",
+                 "score": "90:50", "home_score": 90, "away_score": 50,
+                 "period": "4K", "minutes": 36, "remainingPeriodTime": "5:03"}]
+        out = app.refresh_other_cards(live=live, live_t=now - 8, pre=[], pre_t=now,
+                                      now=now, profiles={10: prof})
+        self.assertEqual(len(out["cards"]), 1)
+        c = out["cards"][0]
+        self.assertEqual(c["score"], "90:50")
+        self.assertNotEqual(c["score"], "70:40")
+        self.assertTrue(c.get("state_warsaw"))
+        self.assertEqual(c.get("state_label"), "stan z %s" % c["state_warsaw"])
+        self.assertEqual(len(c["state_warsaw"].split(":")), 3)
+        self.assertIn(c["home"], ("Parnu",))
+        pub = __import__("other_overs").public_match_card(c)
+        self.assertEqual(pub.get("state_warsaw"), c["state_warsaw"])
+        self.assertEqual(pub.get("score"), "90:50")
+
+    def test_refresh_other_drops_ended_and_stale(self):
+        import time
+        now = time.time()
+        live_prof = self._other_profile(eid=11, mode="live")
+        # ended: was live, no longer on the live list, feed is fresh
+        out = app.refresh_other_cards(live=[], live_t=now - 5, pre=[], pre_t=now,
+                                      now=now, profiles={11: live_prof})
+        self.assertEqual(out["dropped_ended"], 1)
+        self.assertEqual(out["cards"], [])
+        # stale feed: match still listed, but snapshot older than 2 min
+        out2 = app.refresh_other_cards(
+            live=[{"eventId": 11, "home": "Parnu", "away": "Slovan Bratysława",
+                   "sport": "basketball", "mode": "live", "score": "90:50",
+                   "home_score": 90, "away_score": 50, "period": "4K"}],
+            live_t=now - 200, pre=[], pre_t=now, now=now, profiles={11: live_prof})
+        self.assertEqual(out2["dropped_stale"], 1)
+        self.assertFalse(any(c.get("mode") == "live" for c in out2["cards"]))
+
+    def test_refresh_other_keeps_upcoming_prematch(self):
+        import time
+        now = time.time()
+        prof = self._other_profile(eid=12, mode="prematch", seen_live=False,
+                                   ts=int((now + 3600) * 1000), score=None)
+        prof["base"]["score"] = None
+        prof["base"]["home_score"] = None
+        prof["base"]["away_score"] = None
+        prof["base"].pop("period", None)
+        out = app.refresh_other_cards(live=[], live_t=now - 5, pre=[prof["base"]],
+                                      pre_t=now - 5, now=now, profiles={12: prof})
+        self.assertTrue(out["cards"])
+        self.assertEqual(out["cards"][0]["mode"], "prematch")
+        self.assertEqual(out["cards"][0]["home"], "Parnu")
+        self.assertEqual(out["dropped_ended"], 0)
+
+
 
 
 if __name__ == "__main__":

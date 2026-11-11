@@ -17,6 +17,8 @@ G = "https://stats.fn.sportradar.com/betradar/en/Europe:Berlin/gismo/"
 HDR = {"User-Agent": "Mozilla/5.0", "Accept": "application/json"}
 TEAM_TTL = 6 * 3600
 LIST_TTL = 55
+LIST_LIVE_TTL = 30          # świeży wynik live (lista Superbet)
+LIVE_STATE_MAX_AGE = 120    # nie pokazuj live, gdy stan starszy niż ok. 2 min
 WEEK_DAYS = 7
 SEM = threading.Semaphore(4)          # max 4 równoległych zapytań HTTP
 LOCK = threading.Lock()
@@ -112,6 +114,41 @@ def cached(key, ttl, fn):
         if ttl >= DISK_TTL_MIN:
             _disk_put(key, val)
     return val
+
+def cache_fetched_at(key):
+    with LOCK:
+        v = CACHE.get(key)
+    return v[0] if v else None
+
+
+def cache_age(key):
+    ts = cache_fetched_at(key)
+    return None if ts is None else time.time() - ts
+
+
+def state_stamp(fetched_at):
+    """Czas Warszawy HH:MM:SS, z którego pochodzi stan oferty Superbet."""
+    if not fetched_at:
+        return None, None, None
+    try:
+        dt = datetime.fromtimestamp(float(fetched_at), timezone.utc)
+    except (TypeError, ValueError, OSError):
+        return None, None, None
+    warsaw = to_warsaw(dt).strftime("%H:%M:%S")
+    age = time.time() - fetched_at
+    return fetched_at, warsaw, age
+
+
+def stamp_card(card, fetched_at, live=True):
+    if not card:
+        return card
+    ts, warsaw, age = state_stamp(fetched_at)
+    card["state_ts"] = ts
+    card["state_warsaw"] = warsaw
+    card["state_age_seconds"] = None if age is None else round(age)
+    card["state_label"] = ("stan z %s" % warsaw) if warsaw else None
+    return card
+
 
 def gismo(ep):
     d = http_json(G + ep, "Sportradar")
@@ -2161,10 +2198,11 @@ def fetch_live_football():
                 "minutes": m.get("minutes"), "period": m.get("periodStatus"),
                 "score": None if m.get("homeTeamScore") is None else "%s:%s" % (m.get("homeTeamScore"), m.get("awayTeamScore")),
                 "periods": m.get("periods") or [],
+                "remainingPeriodTime": m.get("remainingPeriodTime") or m.get("remainingTime"),
                 "status": m.get("status"), "mode": "live",
             })
         return out
-    return cached("list:live-foot", LIST_TTL, f) or []
+    return cached("list:live-foot", LIST_LIVE_TTL, f) or []
 
 
 def _live_meta(ev):
@@ -2175,6 +2213,7 @@ def _live_meta(ev):
                 tournament=ev.get("league"), category=ev.get("country"),
                 mode="live", minutes=ev.get("minutes"), score=ev.get("score"),
                 period=ev.get("period"), periods=ev.get("periods") or [],
+                remainingPeriodTime=ev.get("remainingPeriodTime"),
                 br=ev.get("br"), o1=ev.get("o1"), ox=ev.get("ox"), o2=ev.get("o2"),
                 start_pl=("%s %s" % (ev.get("day_warsaw") or "", ev.get("start_warsaw") or "")).strip())
 
@@ -2220,8 +2259,14 @@ def _live_odds_for(eids, fetch=False):
     return got
 
 
-def _publish_live_overs(evs, partial=False, fetch_odds=False):
-    cards, skipped = [], {"nobr": 0, "nostats": 0, "noline": 0, "done": 0}
+def _publish_live_overs(evs, partial=False, fetch_odds=False, fetched_at=None):
+    fetched_at = fetched_at if fetched_at is not None else cache_fetched_at("list:live-foot")
+    age = (time.time() - fetched_at) if fetched_at else None
+    stale_feed = bool(fetched_at is None or (age is not None and age > LIVE_STATE_MAX_AGE))
+    listed_n = len(evs or [])
+    if stale_feed:
+        evs = []
+    cards, skipped = [], {"nobr": 0, "nostats": 0, "noline": 0, "done": 0, "stale_feed": int(stale_feed)}
     for ev in evs:
         if not ev.get("br"):
             skipped["nobr"] += 1
@@ -2238,12 +2283,14 @@ def _publish_live_overs(evs, partial=False, fetch_odds=False):
         card = goal_overs.live_match_card(hp, ap, _live_meta(ev))
         skipped["done"] += 1
         if card:
+            stamp_card(card, fetched_at, live=True)
             cards.append(card)
         else:
             skipped["noline"] += 1
     odds_map = _live_odds_for([c.get("eventId") for c in cards], fetch=fetch_odds)
     for i, card in enumerate(cards):
         cards[i] = goal_overs.apply_odds_to_match(card, odds_map.get(card.get("eventId")) or {})
+        stamp_card(cards[i], fetched_at, live=True)
     # wszystkie mecze z historią w jednej liście (mała próba = ostrzeżenie)
     matches_sorted = sorted(
         cards,
@@ -2258,17 +2305,22 @@ def _publish_live_overs(evs, partial=False, fetch_odds=False):
     now = datetime.now(timezone.utc)
     res = {
         "generated_warsaw": to_warsaw(now).strftime("%Y-%m-%d %H:%M:%S"),
+        "feed_warsaw": state_stamp(fetched_at)[1],
+        "feed_age_seconds": None if age is None else round(age),
         "picks": picks, "n_picks": len(picks),
         "matches": pub_matches, "n_matches": len(pub_matches),
         "source": "live", "partial": partial, "mode": "live",
-        "footer": {"matches": len(evs), "checked": skipped["done"],
+        "footer": {"matches": listed_n, "checked": skipped["done"],
                    "without_stats": skipped["nostats"] + skipped["nobr"],
                    "no_sample": skipped["noline"],
+                   "stale_feed": skipped.get("stale_feed", 0),
                    "min_n": goal_overs.MIN_N,
                    "p_min": goal_overs.LIVE_RANK_P_MIN,
                    "edge_plus": goal_overs.EDGE_PLUS},
         "rule": goal_overs.CHANCE_RULE,
-        "note": "Tylko mecze na żywo. Szansa dotyczy goli w pozostałym czasie tej połowy. Każdy mecz raz. Przy typie zawsze widać szansę na wygraną zakładu, kurs i czy się opłaca. Forma, nie gwarancja. Nic nie jest stawiane.",
+        "note": ("Tylko mecze na żywo. Szansa dotyczy goli w pozostałym czasie tej połowy. Każdy mecz raz. Przy typie zawsze widać szansę na wygraną zakładu, kurs i czy się opłaca. Forma, nie gwarancja. Nic nie jest stawiane."
+                 if not stale_feed else
+                 "Nie pokazuję typów live — stan z Superbet jest starszy niż ok. 2 minuty. Chwilę poczekaj i odśwież."),
     }
     with LOCK:
         LIVE_OVERS_STATE.update(res=res, t=time.time())
@@ -2333,14 +2385,15 @@ def _live_overs_worker(job):
 
 
 def get_overs_live():
-    """Karty z cache'owanych profili od razu, stan live co ~minutę, historia z dysku/pamięci."""
+    """Karty z cache'owanych profili od razu, stan live co ~30 s z listy Superbet, historia z dysku/pamięci."""
     evs = fetch_live_football()
+    fetched_at = cache_fetched_at("list:live-foot")
     # usuń zakończone z bieżącego widoku (profile zostają)
     missing = [e for e in evs if e.get("br") and e.get("eventId") not in LIVE_PROFILES
                and (LIVE_FAIL_UNTIL.get(e.get("eventId")) or 0) < time.time()]
-    # kursy dociągamy, gdy historia już jest — cache 55 s, bez dodatkowego liczenia timeline
+    # kursy dociągamy, gdy historia już jest — cache ~30–55 s, bez dodatkowego liczenia timeline
     res = _publish_live_overs(evs, partial=bool(LIVE_OVERS_STATE.get("job") or missing),
-                             fetch_odds=not missing)
+                             fetch_odds=not missing, fetched_at=fetched_at)
     with LOCK:
         job = LIVE_OVERS_STATE.get("job")
         if missing and job is None:
@@ -2373,6 +2426,7 @@ def get_overs_live():
 # ---------- Overy: tenis, siatka, kosz, hokej ----------
 OTHER_OVERS_TTL = 55
 OTHER_OVERS_STATE = {"res": None, "t": 0, "job": None}
+OTHER_PROFILES = {}  # eventId -> historia (lastx + kursy); stan live dokładany przy żądaniu
 OTHER_LIVE_CAP = 12   # na dyscyplinę, najpierw live
 OTHER_PRE_CAP = 8
 OTHER_SPORTS = (1, 2, 3, 4)
@@ -2428,7 +2482,8 @@ def fetch_other_list(state):
                 "status": m.get("status"), "mode": "live" if state == "live" else "prematch",
             })
         return out
-    return cached("list:other-%s" % state, LIST_TTL, f) or []
+    ttl = LIST_LIVE_TTL if state == "live" else LIST_TTL
+    return cached("list:other-%s" % state, ttl, f) or []
 
 
 def _select_other_events(live, pre):
@@ -2474,6 +2529,53 @@ def event_other_odds(eid, sport, live=False):
     return cached("otherodds:%s:%s" % (eid, sport), ttl, f) or {}
 
 
+def _other_base_ev(ev):
+    keys = ("eventId", "sportId", "sport", "name", "home", "away", "br",
+            "tournament", "category", "start", "ts", "start_warsaw", "day_warsaw", "mode")
+    return {k: ev.get(k) for k in keys}
+
+
+def _store_other_profile(ev, home_ms, away_ms, offers, info):
+    eid = ev.get("eventId")
+    if not eid:
+        return
+    rec = {
+        "home_ms": home_ms, "away_ms": away_ms, "offers": offers or {},
+        "info": info, "sport": ev.get("sport"), "sportId": ev.get("sportId"),
+        "base": _other_base_ev(ev),
+        "seen_live": ev.get("mode") == "live",
+        "stored_at": time.time(),
+    }
+    with LOCK:
+        prev = OTHER_PROFILES.get(eid) or {}
+        if prev.get("seen_live"):
+            rec["seen_live"] = True
+        OTHER_PROFILES[eid] = rec
+
+
+def _card_from_other_profile(prof, ev, fetched_at, live=False):
+    ev_full = dict(prof.get("base") or {})
+    ev_full.update(ev or {})
+    ev_full["sport"] = ev_full.get("sport") or prof.get("sport")
+    ev_full["mode"] = "live" if live else (ev_full.get("mode") or "prematch")
+    offers = prof.get("offers") or {}
+    # świeże kursy tylko z pamięci — bez dodatkowego HTTP na żądanie
+    peek = _peek_cached("otherodds:%s:%s" % (ev_full.get("eventId"), ev_full.get("sport")),
+                        LIST_TTL if live else 600)
+    if peek:
+        offers = peek
+    card = other_overs.match_card(prof.get("home_ms") or [], prof.get("away_ms") or [], ev_full, offers)
+    if not card:
+        return None
+    info = prof.get("info") or {}
+    if info.get("tournament") and not card.get("tournament"):
+        card["tournament"] = info["tournament"]
+    if info.get("category") and not card.get("category"):
+        card["category"] = info["category"]
+    stamp_card(card, fetched_at, live=live)
+    return card
+
+
 def _build_other_card(ev):
     br = ev.get("br")
     if not br:
@@ -2496,6 +2598,9 @@ def _build_other_card(ev):
     offers = event_other_odds(ev.get("eventId"), sport, live=(ev.get("mode") == "live"))
     if not offers:
         return None, "noodds"
+    _store_other_profile(ev, home_ms, away_ms, offers, info)
+    live = ev.get("mode") == "live"
+    fetched_at = cache_fetched_at("list:other-live" if live else "list:other-prematch")
     card = other_overs.match_card(home_ms, away_ms, ev, offers)
     if not card:
         return None, "noline"
@@ -2503,10 +2608,68 @@ def _build_other_card(ev):
         card["tournament"] = info["tournament"]
     if info.get("category") and not card.get("category"):
         card["category"] = info["category"]
+    stamp_card(card, fetched_at, live=live)
     return card, None
 
 
-def _publish_other(cards, evs, skipped, processed_ids, partial, listed_by=None):
+def refresh_other_cards(live=None, live_t=None, pre=None, pre_t=None, now=None, profiles=None):
+    """Przelicz karty z zapamiętanej historii i świeżego stanu Superbet. Bez lastx."""
+    now = time.time() if now is None else now
+    if live is None:
+        live = fetch_other_list("live")
+        live_t = cache_fetched_at("list:other-live")
+    if pre is None:
+        pre = fetch_other_list("prematch")
+        pre_t = cache_fetched_at("list:other-prematch")
+    live_age = (now - live_t) if live_t else None
+    live_ok = live_t is not None and live_age is not None and live_age <= LIVE_STATE_MAX_AGE
+    live_by = {e.get("eventId"): e for e in (live or []) if e and e.get("eventId") is not None}
+    pre_by = {e.get("eventId"): e for e in (pre or []) if e and e.get("eventId") is not None}
+    if profiles is None:
+        with LOCK:
+            profiles = dict(OTHER_PROFILES)
+    cards, dropped_stale, dropped_ended = [], 0, 0
+    for eid, prof in (profiles or {}).items():
+        ev_live = live_by.get(eid)
+        if ev_live:
+            if not live_ok:
+                dropped_stale += 1
+                continue
+            c = _card_from_other_profile(prof, ev_live, live_t, live=True)
+            if c:
+                cards.append(c)
+                with LOCK:
+                    if eid in OTHER_PROFILES:
+                        OTHER_PROFILES[eid]["seen_live"] = True
+            continue
+        was_live = bool(prof.get("seen_live") or (prof.get("base") or {}).get("mode") == "live")
+        if was_live:
+            dropped_ended += 1
+            continue
+        ts = (prof.get("base") or {}).get("ts")
+        if ts and now > (ts / 1000.0) + 180:
+            dropped_ended += 1
+            continue
+        ev_pre = pre_by.get(eid) or dict(prof.get("base") or {})
+        ev_pre = dict(ev_pre)
+        ev_pre["mode"] = "prematch"
+        c = _card_from_other_profile(prof, ev_pre, pre_t or prof.get("stored_at"), live=False)
+        if c:
+            cards.append(c)
+    return {
+        "cards": cards,
+        "live": live or [],
+        "live_t": live_t,
+        "live_ok": live_ok,
+        "live_age": live_age,
+        "dropped_stale": dropped_stale,
+        "dropped_ended": dropped_ended,
+        "listed_live": len(live or []),
+        "listed_pre": len(pre or []),
+    }
+
+
+def _publish_other(cards, evs, skipped, processed_ids, partial, listed_by=None, touch=True):
     ranked = other_overs.rank_cards(cards)
     pub_matches = [other_overs.public_match_card(c) for c in cards if c]
     picks = [other_overs.public_line_card(r) for r in ranked]
@@ -2519,8 +2682,11 @@ def _publish_other(cards, evs, skipped, processed_ids, partial, listed_by=None):
         ranked_n = sum(1 for p in picks if p.get("sport") == name)
         sports[name] = {"id": sid, "label": pl, "listed": cov.get(sid, 0),
                         "with_history": with_h, "ranked": ranked_n}
+    live_t = cache_fetched_at("list:other-live")
     res = {
         "generated_warsaw": to_warsaw(now).strftime("%Y-%m-%d %H:%M:%S"),
+        "feed_warsaw": state_stamp(live_t)[1],
+        "feed_age_seconds": None if not live_t else round(time.time() - live_t),
         "picks": picks, "n_picks": len(picks),
         "matches": pub_matches, "n_matches": len(pub_matches),
         "source": "live", "partial": partial,
@@ -2542,7 +2708,9 @@ def _publish_other(cards, evs, skipped, processed_ids, partial, listed_by=None):
         },
     }
     with LOCK:
-        OTHER_OVERS_STATE.update(res=res, t=time.time() if not partial else OTHER_OVERS_STATE["t"] or time.time())
+        OTHER_OVERS_STATE["res"] = res
+        if touch:
+            OTHER_OVERS_STATE["t"] = time.time() if not partial else OTHER_OVERS_STATE["t"] or time.time()
     return res
 
 
@@ -2583,21 +2751,56 @@ def _other_overs_worker(job):
 
 
 def get_overs_other():
-    """Jedna zakładka: live i przed meczem, tenis / siatka / kosz / hokej."""
+    """Jedna zakładka: live i przed meczem. Stan live ze świeżej listy Superbet, historia z cache."""
     with LOCK:
         res, t, job = OTHER_OVERS_STATE["res"], OTHER_OVERS_STATE["t"], OTHER_OVERS_STATE["job"]
-        fresh = bool(res and not res.get("partial") and t and time.time() - t < OTHER_OVERS_TTL)
-        if not fresh and job is None:
+        has_prof = bool(OTHER_PROFILES)
+        history_fresh = bool(t and time.time() - t < OTHER_OVERS_TTL and res and not res.get("partial"))
+        if not history_fresh and job is None:
             job = OTHER_OVERS_STATE["job"] = {
                 "progress": {"done": 0, "total": 0},
                 "started": time.time(), "beat": time.time(), "cancel": False,
             }
             threading.Thread(target=_other_overs_worker, args=(job,), daemon=True).start()
-    if res is not None:
-        out = dict(res)
-        status = "computing" if job and not fresh else "ready"
-        out.update(status=status, stale=not fresh,
-                   age_seconds=round(time.time() - t) if t else None,
+    meta = refresh_other_cards()
+    cards = meta["cards"]
+    if cards or has_prof or (res and (res.get("matches") or res.get("picks"))):
+        # przelicz typowanie na świeżym stanie; lista evs tylko do stopki
+        evs = list(meta.get("live") or [])
+        skipped = {
+            "nostats": (res or {}).get("footer", {}).get("without_stats", 0) if res else 0,
+            "nobr": 0,
+            "thin": (res or {}).get("footer", {}).get("too_weak", 0) if res else 0,
+            "noodds": (res or {}).get("footer", {}).get("no_odds", 0) if res else 0,
+            "noline": (res or {}).get("footer", {}).get("no_line", 0) if res else 0,
+        }
+        listed_by = {}
+        for e in evs:
+            listed_by[e.get("sportId")] = listed_by.get(e.get("sportId"), 0) + 1
+        # też przedmeczowe z profili
+        with LOCK:
+            for pr in OTHER_PROFILES.values():
+                sid = pr.get("sportId")
+                if sid is not None:
+                    listed_by[sid] = listed_by.get(sid, 0)
+        processed = set()
+        out = _publish_other(cards, evs, skipped, processed,
+                             partial=bool(job and not history_fresh), listed_by=listed_by,
+                             touch=False)
+        out["feed_warsaw"] = state_stamp(meta.get("live_t"))[1]
+        out["feed_age_seconds"] = None if meta.get("live_age") is None else round(meta["live_age"])
+        out["dropped_ended"] = meta.get("dropped_ended", 0)
+        out["dropped_stale"] = meta.get("dropped_stale", 0)
+        if not meta.get("live_ok") and any((c.get("mode") == "live") for c in cards):
+            pass
+        if not meta.get("live_ok"):
+            # live karty już wycięte w refresh; dopisz komunikat gdy coś wypadło
+            if meta.get("dropped_stale"):
+                out["note"] = ("Nie pokazuję typów live — stan z Superbet jest starszy niż ok. 2 minuty. "
+                               "Przedmeczowe zostawiam. Chwilę poczekaj i odśwież. " + (out.get("note") or ""))
+        status = "computing" if job and not history_fresh else "ready"
+        out.update(status=status, stale=not history_fresh,
+                   age_seconds=None if not meta.get("live_t") else round(time.time() - meta["live_t"]),
                    errors=dict(ERRORS))
         if job:
             out["progress"] = dict(job["progress"])
@@ -2607,7 +2810,7 @@ def get_overs_other():
             "progress": dict(job["progress"]) if job else {"done": 0, "total": 0},
             "elapsed_seconds": round(time.time() - job["started"]) if job else 0,
             "errors": dict(ERRORS), "picks": [], "matches": [],
-            "note": "Liczą się overy tenisa, siatkówki, kosza i hokeja w tle. Nic nie jest stawiane."}
+            "note": "Liczą się overy tenisa, siatkówki, kosza i hokeja w tle. To chwilę trwa — nic nie zmyślam. Nic nie jest stawiane."}
 
 
 # ---------- ranking w tle (single-flight + cache) ----------

@@ -2300,6 +2300,7 @@ _PUBLIC_KEYS = ("rank", "eventId", "start_warsaw", "day_warsaw", "ts", "home", "
             "odds", "time_label", "phase", "period", "frac_base", "frac_cond", "line", "qualified",
             "need", "scope", "implied", "implied_pct", "edge", "edge_pp", "verdict",
             "unreliable", "odds_under", "current",
+            "state_ts", "state_warsaw", "state_age_seconds", "state_label",
             "half", "goals_so_far", "tot", "goals_1h", "goals_2h", "recommend")
 
 

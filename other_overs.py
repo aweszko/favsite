@@ -851,6 +851,10 @@ def public_match_card(c):
     out["sport_pl"] = c.get("sport_pl")
     out["time_label"] = c.get("time_label")
     out["mode"] = c.get("mode")
+    for k in ("state_ts", "state_warsaw", "state_age_seconds", "state_label",
+              "remainingPeriodTime", "score"):
+        if c.get(k) is not None:
+            out[k] = c.get(k)
     g.sanitize_team_names(out, c)
     rec = None
     best = best_rank_line(c)
@@ -873,5 +877,8 @@ def public_line_card(c):
     out["sport_pl"] = c.get("sport_pl")
     out["mode"] = c.get("mode")
     out["time_label"] = c.get("time_label")
+    for k in ("state_ts", "state_warsaw", "state_age_seconds", "state_label", "score"):
+        if c.get(k) is not None:
+            out[k] = c.get(k)
     g.sanitize_team_names(out, c)
     return out
