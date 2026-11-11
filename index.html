@@ -122,6 +122,7 @@ input:focus,button:focus-visible{outline:2px solid var(--g);outline-offset:1px}.
 .oc-bar{height:8px;border-radius:99px;background:#221c10;overflow:hidden;border:1px solid #3a3014}
 .oc-bar i{display:block;height:100%;background:var(--gg);border-radius:99px}
 .oc-why{font-size:12px;color:var(--s);margin-top:8px;line-height:1.4}
+.oc-pending{color:var(--g3)}
 .oc-chev{margin-left:4px;color:var(--s);font-size:11px}
 .oc-detail{margin:0 10px 12px;padding:12px;border:1px solid #c9a227;border-top:0;border-radius:0 0 14px 14px;background:#120e08;overflow-x:auto}
 .oc-detail .row{margin:6px 0;font-size:13px;overflow-wrap:anywhere}
@@ -441,6 +442,10 @@ function liveMeta(c, kind){
 }
 function compactOffer(ln){
  if(!ln) return '';
+ if(ln.pending){
+  const why=safeText(ln.why)||'Liczą się ostatnie mecze obu drużyn (każda z różnymi rywalami). Typ pojawi się za chwilę.';
+  return '<div class="oc-why oc-pending">'+esc(why)+'</div>';
+ }
  const pct=chancePct(ln);
  const k=worthKind(ln);
  const kurs=ln.odds!=null?fmtOdds(ln.odds):'—';
@@ -555,6 +560,7 @@ function bindOversClicks(box, kind){
 }
 function oversEmptyMsg(kind,d){
  if(d&&d.note&&String(d.note).indexOf('2 minuty')>=0) return d.note;
+ if(d&&d.status=='computing'&&(d.matches||[]).length) return 'Typy pojawią się, gdy doliczę historię obu drużyn (każda z różnymi rywalami). Poniżej już widać mecze live z Superbet.';
  if(kind==='other') return 'Na razie żaden typ nie ma jednocześnie szansy ≥ 60%, kursu ok. 1,30 i wystarczającej historii. Jeśli poniżej są mecze, kliknij kartę, żeby zobaczyć linie.';
  if(kind==='live') return 'Teraz żadna linia nie ma jednocześnie szansy ≥ 60% i kursu Superbet. Jeśli poniżej są mecze, kliknij kartę, żeby zobaczyć szczegóły.';
  return 'Brak typów na 1. połowę z szansą ≥ 60% i kursem ok. 1,30 albo wyższym. Jeśli poniżej są mecze, kliknij kartę, żeby zobaczyć over 0,5, 1,5 i 2,5 w 1. połowie.';

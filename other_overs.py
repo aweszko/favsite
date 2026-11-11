@@ -691,7 +691,7 @@ def live_why(k, n, ev, st, field, part, line, current, sport):
     if need > 0:
         bits.append("trzeba jeszcze ponad %s" % _fmt_need(need))
     extra = (", ".join(bits) + ", ") if bits else ""
-    return ("w %d z %d meczów tych drużyn w pozostałym czasie (%s) padło tyle, ile trzeba do over %s" % (
+    return ("w %d z %d ostatnich meczów obu drużyn (każda z różnymi rywalami) w pozostałym czasie (%s) padło tyle, ile trzeba do over %s" % (
         k, n, extra.rstrip(", "), _fmt_need(line)))
 
 
@@ -717,7 +717,7 @@ def make_line(home_ms, away_ms, offer, ev, st):
     ch = emp_chance(k, n)
     if not ch:
         return None
-    why = "w %d z %d ostatnich meczów tych drużyn było ponad %s" % (
+    why = "w %d z %d ostatnich meczów obu drużyn (każda z różnymi rywalami) było ponad %s" % (
         k, n, offer["play"].replace("Over ", "", 1))
     if live:
         why = live_why(k, n, ev, st, field, part, line, current, sport)

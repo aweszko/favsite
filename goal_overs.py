@@ -543,11 +543,11 @@ def _summary(play, used, enter, extra=None):
     pct_s = used.get("pct")
     chance_s = ("ok. %d%%" % pct_s) if pct_s is not None else "—"
     typ = (play[0].lower() + play[1:]) if play else "ten typ"
-    text = "Zagraj %s. %s padł w %s spotkań tych drużyn (%s). Szansa: %s. Kiedy wejść: %s." % (
+    text = "Zagraj %s. %s padł w %s ostatnich meczów obu drużyn (każda z różnymi rywalami) (%s). Szansa: %s. Kiedy wejść: %s." % (
         typ, _event_phrase(play), raw_s, fr, chance_s, enter)
     # "Co najmniej dwa gole padł" is ugly — special-case
     if "1.5" in (play or ""):
-        text = "Zagraj %s. Co najmniej dwa gole padły w %s spotkań tych drużyn (%s). Szansa: %s. Kiedy wejść: %s." % (
+        text = "Zagraj %s. Co najmniej dwa gole padły w %s ostatnich meczów obu drużyn (każda z różnymi rywalami) (%s). Szansa: %s. Kiedy wejść: %s." % (
             typ, raw_s, fr, chance_s, enter)
     if extra:
         text += " " + extra
@@ -684,7 +684,7 @@ def _why(market, used):
     if key == "over05_1h":
         raw = used.get("p_raw")
         raw_s = ("%d%%" % int(round(100 * raw))) if raw is not None else "—"
-        return "gol w 1. połowie padł w %s spotkań tych drużyn (%s)" % (raw_s, fr)
+        return "gol w 1. połowie padł w %s ostatnich meczów obu drużyn (każda z różnymi rywalami) (%s)" % (raw_s, fr)
     if key == "over05_2h":
         if market.get("use_cond"):
             return "gdy do przerwy był najwyżej 1 gol, gol w 2. połowie padł w %s ostatnich meczów obu drużyn" % fr
@@ -696,9 +696,9 @@ def _why(market, used):
     if key == "over25":
         return "w meczu padały co najmniej 3 gole w %s ostatnich meczów obu drużyn" % fr
     if key == "btts":
-        return "obie drużyny strzeliły w %s ostatnich meczów tych drużyn" % fr
+        return "obie drużyny strzeliły w %s ostatnich meczów obu drużyn (każda z różnymi rywalami)" % fr
     if key == "over_next":
-        return "po tej minucie padł jeszcze co najmniej jeden gol w %s meczach tych drużyn" % fr
+        return "po tej minucie padł jeszcze co najmniej jeden gol w %s ostatnich meczach obu drużyn (każda z różnymi rywalami)" % fr
     if key == "over05_late":
         return "gol po 75. minucie padł w %s ostatnich meczów obu drużyn z znanymi minutami" % fr
     if key.startswith("team2h_"):
@@ -894,7 +894,7 @@ def pre_over_lines(home, away):
         ch = chance_block(k, n, _mean2(lamh, lama), line)
         if ch.get("p") is None or not n:
             continue
-        why = "%s w %s meczach tych drużyn" % (why_verb, ch.get("frac") or "—")
+        why = "%s w %s ostatnich meczach obu drużyn (każda z różnymi rywalami)" % (why_verb, ch.get("frac") or "—")
         if nh or na:
             why += " (osobno gospodarze %s, goście %s)" % (frac(kh, nh) or "—", frac(ka, na) or "—")
         lines.append({
@@ -1277,7 +1277,7 @@ def _need_why(need, half, phase, t, fr, k=None, n=None):
         where = "do przerwy"
     else:
         where = "w 2. połowie"
-    return "w %s meczów tych drużyn %s %s" % (words, what, where)
+    return "w %s ostatnich meczów obu drużyn (każda z różnymi rywalami) %s %s" % (words, what, where)
 
 
 def make_live_lines(dist, st):
@@ -1799,7 +1799,7 @@ def similar_situation(home, away, st, t=None, goals_so_far=0, meta=None):
             bits.append("jest remis")
     if use_minute and t is not None:
         bits.append("stan z przerwy" if phase == "ht" else "stan z tej samej minuty (ok. %d.)" % int(t))
-    intro = "Szukam podobnych meczów tych drużyn: %s." % ", ".join(bits) if bits else "Szukam podobnych meczów tych drużyn."
+    intro = "Szukam podobnych ostatnich meczów obu drużyn (każda z różnymi rywalami): %s." % ", ".join(bits) if bits else "Szukam podobnych ostatnich meczów obu drużyn (każda z różnymi rywalami)."
     k = sum(1 for rem in (h + a) if rem >= 1)
     kh, nh = sum(1 for rem in h if rem >= 1), len(h)
     ka, na = sum(1 for rem in a if rem >= 1), len(a)
@@ -1807,7 +1807,7 @@ def similar_situation(home, away, st, t=None, goals_so_far=0, meta=None):
         body = "Nie znalazłem podobnego meczu — nie da się uczciwie powiedzieć, jak często pada kolejny gol."
         why = None
     else:
-        body = "W %d z %d podobnych meczów tych drużyn padł kolejny gol" % (k, n)
+        body = "W %d z %d podobnych ostatnich meczów obu drużyn (każda z różnymi rywalami) padł kolejny gol" % (k, n)
         sides = []
         if nh:
             sides.append("gospodarze w %d z %d" % (kh, nh))
@@ -1824,7 +1824,7 @@ def similar_situation(home, away, st, t=None, goals_so_far=0, meta=None):
                     extra, "gol" if extra == 1 else "gole", _w_meczach(kk)))
         if more:
             body += " Potem padło %s." % ", ".join(more)
-        why = "w %d z %d podobnych meczów tych drużyn padł kolejny gol" % (k, n)
+        why = "w %d z %d podobnych ostatnich meczów obu drużyn (każda z różnymi rywalami) padł kolejny gol" % (k, n)
         if n < 8:
             body += " " + _mala_proba(n)
     if skipped:
@@ -1870,7 +1870,7 @@ def prior_half_context(home, away, st, t=None, goals_so_far=0):
     n = len(sample)
     twos = [m.get("tot_2h") or 0 for m in sample]
     parts = ["%d+ goli w 2. połowie w %d" % (th, k) for th, k in _plus_counts(twos)]
-    text = "W %s meczach tych drużyn %s." % (frac_words(n, n_all) or "0 z %d" % n_all, label)
+    text = "W %s ostatnich meczach obu drużyn (każda z różnymi rywalami) %s." % (frac_words(n, n_all) or "0 z %d" % n_all, label)
     if n:
         text += " Z tych %s: %s." % (_pl_nom_mecze(n), ", ".join(parts))
         if n < 8:
@@ -1930,7 +1930,7 @@ def build_live_detail(card, dist, home, away, st):
     else:
         when = "do końca 2. połowy od %d. minuty" % t if t is not None else "w 2. połowie"
     nxt_frac = nxt.get("frac") or "—"
-    nxt_s = "Szansa na kolejnego gola %s: ok. %s%% (padł w %s meczach tych drużyn%s)." % (
+    nxt_s = "Szansa na kolejnego gola %s: ok. %s%% (padł w %s ostatnich meczach obu drużyn (każda z różnymi rywalami)%s)." % (
         when, nxt["pct"] if nxt.get("pct") is not None else "—", nxt_frac, _sides_clause(nxt))
     cond = []
     for extra in (1, 2, 3):
@@ -1943,7 +1943,7 @@ def build_live_detail(card, dist, home, away, st):
         if not ch.get("n"):
             continue
         phrase = _total_goals_phrase(total, half)
-        cond.append("%s w %s meczach tych drużyn%s." % (
+        cond.append("%s w %s ostatnich meczach obu drużyn (każda z różnymi rywalami)%s." % (
             phrase[0].upper() + phrase[1:], ch.get("frac") or "—", _sides_clause(ch)))
     # jeśli gsf>=1, pierwsze cond to (gsf+1)+ czyli 2+ gdy był 1 gol — user explicitly wants 2+ and 3+
     # extra 1 was skipped; add total=gsf+1 if gsf>=1 (2+ when 1 already)
@@ -1951,7 +1951,7 @@ def build_live_detail(card, dist, home, away, st):
         ch = by.get(1) or {}
         if ch.get("n"):
             phrase = _total_goals_phrase(int(gsf) + 1, half)
-            cond.insert(0, "%s w %s meczach tych drużyn%s." % (
+            cond.insert(0, "%s w %s ostatnich meczach obu drużyn (każda z różnymi rywalami)%s." % (
                 phrase[0].upper() + phrase[1:], ch.get("frac") or "—", _sides_clause(ch)))
     sc = phase_scoring(home, away, half, t)
     H, A = sc["home"], sc["away"]
@@ -2153,7 +2153,7 @@ _MATCH_COPY_KEYS = (
     "time_label", "phase", "minutes", "period", "tournament",
     "category", "start_warsaw", "day_warsaw", "ts", "warnings",
     "recommend", "o1", "o2",
-    "state_ts", "state_warsaw", "state_age_seconds", "state_label",
+    "state_ts", "state_warsaw", "state_age_seconds", "state_label", "pending",
 )
 
 
@@ -2301,7 +2301,7 @@ _PUBLIC_KEYS = ("rank", "eventId", "start_warsaw", "day_warsaw", "ts", "home", "
             "odds", "time_label", "phase", "period", "frac_base", "frac_cond", "line", "qualified",
             "need", "scope", "implied", "implied_pct", "edge", "edge_pp", "verdict",
             "unreliable", "odds_under", "current",
-            "state_ts", "state_warsaw", "state_age_seconds", "state_label",
+            "state_ts", "state_warsaw", "state_age_seconds", "state_label", "pending",
             "half", "goals_so_far", "tot", "goals_1h", "goals_2h", "recommend")
 
 

@@ -1057,7 +1057,7 @@ class TGoalOvers(unittest.TestCase):
         self.assertIn("1. połowie", card["play"])
         # w 1H linia meczu nie jest równoważna golowi do przerwy — nie dodajemy jej
         self.assertFalse(any(ln["scope"] == "match" for ln in card["lines"]))
-        self.assertRegex(card["summary"], r"w 20 z 20 meczów tych drużyn padł kolejny gol do przerwy")
+        self.assertIn("w 20 z 20 ostatnich meczów obu drużyn (każda z różnymi rywalami) padł kolejny gol do przerwy", card["summary"])
 
     def test_live_1h_with_goal_maps_to_over15_in_first_half(self):
         import goal_overs as g
@@ -1159,7 +1159,7 @@ class TGoalOvers(unittest.TestCase):
         self.assertEqual(by["over35"]["line"], 3.5)
         self.assertEqual(by["over25_2h"]["need"], 3)
         self.assertEqual(by["over45"]["need"], 3)
-        self.assertIn("w 16 z 20 meczów tych drużyn padły jeszcze co najmniej 2 gole w 2. połowie", by["over35"]["why"])
+        self.assertIn("w 16 z 20 ostatnich meczów obu drużyn (każda z różnymi rywalami) padły jeszcze co najmniej 2 gole w 2. połowie", by["over35"]["why"])
         # kurs 1.22 na over 0.5 / 2.5 to MINUS przy typowej szansie ~70%+; over 3.5 @1.85 to PLUS
         card = g.apply_odds_to_match(card, {"over05_2h": 1.22, "over25": 1.22, "over35": 1.85, "over15_2h": 1.70})
         by = {ln["key"]: ln for ln in card["lines"]}
@@ -1210,7 +1210,7 @@ class TGoalOvers(unittest.TestCase):
         d = card["detail"]
         self.assertIn("Wynik 2:0", d["state"])
         self.assertIn("padły już 2 gole", d["state"])
-        self.assertIn("W 6 z 17 meczach tych drużyn 1. połowa 0:0", d["given_1h"])
+        self.assertIn("W 6 z 17 ostatnich meczach obu drużyn (każda z różnymi rywalami) 1. połowa 0:0", d["given_1h"])
         self.assertIn("3+ goli w 2. połowie w 4", d["given_1h"])
         self.assertIn("4+ goli w 2. połowie w 1", d["given_1h"])
         self.assertIn("To tylko 6 meczów", d["given_1h"])
@@ -1701,6 +1701,34 @@ class TFreshOvers(unittest.TestCase):
 
 
 
+    def test_live_publish_shows_pending_matches(self):
+        """Po restarcie, zanim będzie historia, lista live i tak pokazuje mecze z Superbet."""
+        import time
+        old = dict(app.LIVE_OVERS_STATE)
+        old_prof = dict(app.LIVE_PROFILES)
+        try:
+            app.LIVE_PROFILES.clear()
+            evs = [
+                {"eventId": 101, "br": 1, "home": "Alfa", "away": "Beta",
+                 "mode": "live", "score": "2:0", "minutes": 67, "period": "2. połowa"},
+                {"eventId": 102, "br": 2, "home": "Gamma", "away": "Delta",
+                 "mode": "live", "score": "0:1", "minutes": 12, "period": "1. połowa"},
+            ]
+            res = app._publish_live_overs(evs, partial=True, fetch_odds=False,
+                                          fetched_at=time.time() - 5)
+            self.assertEqual(res["n_matches"], 2)
+            homes = {m["home"] for m in res["matches"]}
+            self.assertEqual(homes, {"Alfa", "Gamma"})
+            self.assertTrue(all(m.get("pending") for m in res["matches"]))
+            self.assertTrue(all(m.get("score") for m in res["matches"]))
+            self.assertTrue(all(m.get("state_label") for m in res["matches"]))
+            self.assertFalse(res.get("picks"))  # bez historii nie typuję
+            self.assertIn("różnymi rywalami", res["matches"][0].get("why") or "")
+        finally:
+            app.LIVE_OVERS_STATE.clear()
+            app.LIVE_OVERS_STATE.update(old)
+            app.LIVE_PROFILES.clear()
+            app.LIVE_PROFILES.update(old_prof)
 
 if __name__ == "__main__":
     unittest.main()

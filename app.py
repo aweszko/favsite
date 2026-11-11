@@ -2259,6 +2259,64 @@ def _live_odds_for(eids, fetch=False):
     return got
 
 
+
+PENDING_WHY = ("Liczą się ostatnie mecze obu drużyn (każda z różnymi rywalami). "
+               "Wynik i minuta są już z Superbet. Typ pojawi się, gdy doliczę historię — nic nie zmyślam.")
+
+
+def _ev_time_label(ev):
+    bits = ["LIVE"]
+    if ev.get("score"):
+        bits.append(str(ev["score"]))
+    if ev.get("period"):
+        bits.append(str(ev["period"]))
+    mins = ev.get("minutes")
+    if mins is not None and mins != "":
+        bits.append("%s'" % mins)
+    rem = ev.get("remainingPeriodTime") or ev.get("remaining")
+    if rem:
+        bits.append("zostaje %s" % rem)
+    return " · ".join(bits)
+
+
+def _pending_live_card(ev, fetched_at, sport_pl=None, sport=None):
+    """Karta z wynikiem Superbet, zanim doliczę historię — żeby lista live nie była pusta."""
+    if not ev:
+        return None
+    home = ev.get("home") or ev.get("home_name") or ""
+    away = ev.get("away") or ev.get("away_name") or ""
+    card = {
+        "eventId": ev.get("eventId"),
+        "home": home, "away": away, "home_name": home, "away_name": away,
+        "score": ev.get("score"),
+        "minutes": ev.get("minutes"),
+        "period": ev.get("period") or ev.get("periodStatus"),
+        "remainingPeriodTime": ev.get("remainingPeriodTime") or ev.get("remaining"),
+        "time_label": ev.get("time_label") or _ev_time_label(ev),
+        "mode": "live",
+        "tournament": ev.get("tournament") or ev.get("league"),
+        "category": ev.get("category") or ev.get("country"),
+        "start_warsaw": ev.get("start_warsaw"),
+        "day_warsaw": ev.get("day_warsaw"),
+        "ts": ev.get("ts"),
+        "pending": True,
+        "lines": [],
+        "play": None,
+        "chance": None,
+        "chance_pct": None,
+        "why": PENDING_WHY,
+        "recommend": PENDING_WHY,
+        "warnings": [],
+        "sport": sport or ev.get("sport"),
+        "sport_pl": sport_pl or ev.get("sport_pl"),
+    }
+    if card["sport"] and not card["sport_pl"]:
+        card["sport_pl"] = other_overs.SPORT_PL.get(card["sport"], card["sport"])
+    goal_overs.sanitize_team_names(card)
+    stamp_card(card, fetched_at, live=True)
+    return card
+
+
 def _publish_live_overs(evs, partial=False, fetch_odds=False, fetched_at=None):
     fetched_at = fetched_at if fetched_at is not None else cache_fetched_at("list:live-foot")
     age = (time.time() - fetched_at) if fetched_at else None
@@ -2275,9 +2333,9 @@ def _publish_live_overs(evs, partial=False, fetch_odds=False, fetched_at=None):
         if not pair:
             if ev.get("eventId") in LIVE_PROFILES:
                 skipped["nostats"] += 1
-            continue
-        if pair is None:
-            skipped["nostats"] += 1
+            pending = _pending_live_card(ev, fetched_at, sport_pl="Piłka")
+            if pending:
+                cards.append(pending)
             continue
         hp, ap = pair
         card = goal_overs.live_match_card(hp, ap, _live_meta(ev))
@@ -2287,20 +2345,25 @@ def _publish_live_overs(evs, partial=False, fetch_odds=False, fetched_at=None):
             cards.append(card)
         else:
             skipped["noline"] += 1
+            pending = _pending_live_card(ev, fetched_at, sport_pl="Piłka")
+            if pending:
+                cards.append(pending)
     odds_map = _live_odds_for([c.get("eventId") for c in cards], fetch=fetch_odds)
     for i, card in enumerate(cards):
         cards[i] = goal_overs.apply_odds_to_match(card, odds_map.get(card.get("eventId")) or {})
         stamp_card(cards[i], fetched_at, live=True)
-    # wszystkie mecze z historią w jednej liście (mała próba = ostrzeżenie)
+    # karty z historią na górze, potem mecze live z Superbet jeszcze bez typów
+    ready = [c for c in cards if c and not c.get("pending")]
+    pending = [c for c in cards if c and c.get("pending")]
     matches_sorted = sorted(
-        cards,
+        ready,
         key=lambda m: (
             -(max((ln.get("edge") if ln.get("edge") is not None else -99) for ln in (m.get("lines") or []) or [{}])),
             -(max((ln.get("chance") or 0) for ln in (m.get("lines") or []) or [{}])),
             m.get("ts") or 0,
         ),
-    )
-    picks = [goal_overs.public_line_card(c) for c in goal_overs.rank_live_lines(matches_sorted)]
+    ) + pending
+    picks = [goal_overs.public_line_card(c) for c in goal_overs.rank_live_lines(ready)]
     pub_matches = [goal_overs.public_match_card(m) for m in matches_sorted]
     now = datetime.now(timezone.utc)
     res = {
@@ -2769,7 +2832,19 @@ def get_overs_other():
             }
             threading.Thread(target=_other_overs_worker, args=(job,), daemon=True).start()
     meta = refresh_other_cards()
-    cards = meta["cards"]
+    cards = list(meta["cards"] or [])
+    if meta.get("live_ok"):
+        have = {c.get("eventId") for c in cards}
+        for ev in meta.get("live") or []:
+            eid = ev.get("eventId")
+            if eid is None or eid in have:
+                continue
+            pend = _pending_live_card(ev, meta.get("live_t"),
+                                      sport=ev.get("sport"),
+                                      sport_pl=other_overs.SPORT_PL.get(ev.get("sport"), ev.get("sport")))
+            if pend:
+                cards.append(pend)
+                have.add(eid)
     if cards or has_prof or (res and (res.get("matches") or res.get("picks"))):
         # przelicz typowanie na świeżym stanie; lista evs tylko do stopki
         evs = list(meta.get("live") or [])
