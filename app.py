@@ -2835,7 +2835,8 @@ def get_overs_other():
     cards = list(meta["cards"] or [])
     if meta.get("live_ok"):
         have = {c.get("eventId") for c in cards}
-        for ev in meta.get("live") or []:
+        # tylko tyle, ile i tak policzę (limit na dyscyplinę) — nie zalewaj listy całym Superbet
+        for ev in _select_other_events(meta.get("live") or [], []):
             eid = ev.get("eventId")
             if eid is None or eid in have:
                 continue
